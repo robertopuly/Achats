@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Lista Supermercato & Database Acquisti — Achats</title>
+    <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+    <!-- NOTIFICA TOAST -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- SCHERMATA DI LOGIN / REGISTRAZIONE -->
+    <section id="auth-screen" class="auth-screen hidden">
+        <div class="auth-card">
+            <div class="auth-brand">
+                <div class="auth-logo">🛒</div>
+                <h1>Lista Supermercato</h1>
+                <p>Gestisci la spesa e il database acquisti da PC e Smartphone</p>
+            </div>
+
+            <div class="auth-tabs">
+                <button type="button" id="tab-login" class="auth-tab active" onclick="switchAuthTab('login')">
+                    Accedi
+                </button>
+                <button type="button" id="tab-register" class="auth-tab" onclick="switchAuthTab('register')">
+                    Registrati
+                </button>
+            </div>
+
+            <div id="auth-error" class="auth-error hidden"></div>
+
+            <!-- FORM LOGIN -->
+            <form id="login-form" class="auth-form" onsubmit="handleLogin(event)">
+                <div class="form-group">
+                    <label for="login-username">Nome utente</label>
+                    <input type="text" id="login-username" required autocomplete="username" placeholder="Es. roberto" />
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Password</label>
+                    <input type="password" id="login-password" required autocomplete="current-password" placeholder="Inserisci la password" />
+                </div>
+                <button type="submit" class="btn btn-primary btn-block btn-lg">
+                    Entra nella Lista →
+                </button>
+            </form>
+
+            <!-- FORM REGISTRAZIONE (con login automatico immediato) -->
+            <form id="register-form" class="auth-form hidden" onsubmit="handleRegister(event)">
+                <div class="form-group">
+                    <label for="reg-username">Scegli un nome utente</label>
+                    <input type="text" id="reg-username" required minlength="2" autocomplete="username" placeholder="Es. roberto" />
+                </div>
+                <div class="form-group">
+                    <label for="reg-displayname">Nome visualizzato (opzionale)</label>
+                    <input type="text" id="reg-displayname" placeholder="Es. Roberto" />
+                </div>
+                <div class="form-group">
+                    <label for="reg-password">Scegli una password</label>
+                    <input type="password" id="reg-password" required minlength="3" autocomplete="new-password" placeholder="Minimo 3 caratteri" />
+                </div>
+                <button type="submit" class="btn btn-primary btn-block btn-lg">
+                    Registrati ed Entra Subito →
+                </button>
+                <p class="auth-hint">Dopo la registrazione l'accesso sarà automatico.</p>
+            </form>
+
+            <div class="auth-lan-box">
+                <span>📱 Indirizzo Smartphone (Rete Locale):</span>
+                <strong id="auth-lan-url">http://...</strong>
+            </div>
+        </div>
+    </section>
+
+    <!-- APPLICAZIONE PRINCIPALE -->
+    <div id="app-screen" class="app-screen hidden">
+        <!-- HEADER PRINCIPALE -->
+        <header class="app-header">
+            <div class="header-top">
+                <div class="brand-area">
+                    <span class="brand-icon">🛒</span>
+                    <div>
+                        <h1 class="app-title">Lista Supermercato</h1>
+                        <span class="sync-badge" id="sync-status">● In linea</span>
+                    </div>
+                </div>
+
+                <!-- SELETTORE SEZIONE PRINCIPALE: LISTA SPESA vs DATABASE ACQUISTI (Visibile solo su PC) -->
+                <div class="main-nav-tabs pc-only">
+                    <button type="button" id="nav-tab-list" class="main-nav-btn active" onclick="switchMainSection('list')">
+                        🛒 Lista della Spesa
+                    </button>
+                    <button type="button" id="nav-tab-db" class="main-nav-btn" onclick="switchMainSection('db')">
+                        📊 Mostra database (<span id="nav-db-count">0</span>)
+                    </button>
+                </div>
+
+                <div class="header-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="openLanModal()" title="Connetti Smartphone">
+                        📱 <span class="hide-xs">Smartphone</span>
+                    </button>
+                    <div class="user-pill">
+                        <span>👤 <strong id="current-user-name">Utente</strong></span>
+                        <button type="button" class="btn-logout" onclick="handleLogout()" title="Esci">Esci</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- BARRA GESTIONE LISTA, DATA E FORNITORE (Visibile nella sezione Lista della Spesa) -->
+            <div id="list-header-toolbar" class="list-toolbar">
+                <div class="list-selector-group">
+                    <label for="list-select" class="toolbar-label">Lista attiva:</label>
+                    <select id="list-select" class="list-select" onchange="onSelectListChange(this.value)"></select>
+                </div>
+
+                <div class="list-date-group">
+                    <label for="current-list-date" class="toolbar-label">📅 Data:</label>
+                    <input type="date" id="current-list-date" class="date-input" onchange="onChangeListDate(this.value)" title="Data di creazione della lista (modificabile)" />
+                </div>
+
+                <div class="list-date-group">
+                    <label for="current-list-fornitore" class="toolbar-label">🏪 Fornitore:</label>
+                    <select id="current-list-fornitore" class="date-input" onchange="onChangeListFornitore(this.value)" title="Fornitore della lista (Aldi, Coop, Lidl, Migros...)"></select>
+                </div>
+
+                <div class="list-buttons-group">
+                    <button type="button" id="btn-toolbar-show-db" class="btn btn-show-db pc-only" onclick="switchMainSection('db')" title="Apri la Tabella Principale Acquisti (visibile solo su PC)">
+                        📊 Mostra database
+                    </button>
+                    <button type="button" class="btn btn-pdf" onclick="downloadCurrentViewPdf()" title="Crea e salva il PDF della vista attuale">
+                        📄 Salva PDF
+                    </button>
+                    <button type="button" class="btn btn-db-sync pc-only" onclick="importCurrentListToDb('active')" title="Registra i prodotti in lista nella Tabella Principale Acquisti">
+                        📥 Registra in DB
+                    </button>
+                    <button type="button" class="btn btn-accent" onclick="openNewListModal()">
+                        ＋ Nuova Lista
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="openAddProductModal()">
+                        ＋ Prodotto
+                    </button>
+                    <button type="button" class="btn btn-outline-icon" onclick="openFornitoriModal()" title="Gestisci elenco Fornitori (Aldi, Coop, Lidl, Migros)">
+                        🏪
+                    </button>
+                    <button type="button" class="btn btn-outline-icon" onclick="openListMenuModal()" title="Opzioni Lista">
+                        ⚙️
+                    </button>
+                </div>
+            </div>
+
+            <!-- BARRA GESTIONE DATABASE ACQUISTI (Visibile nella sezione Database Acquisti) -->
+            <div id="db-header-toolbar" class="list-toolbar hidden">
+                <div class="db-toolbar-title">
+                    <span>📊 <strong>Tabella Principale Acquisti</strong> — Descrizione, Fornitore, Prezzo Unitario, Quantità, Prezzo Totale e Data</span>
+                </div>
+                <div class="list-buttons-group">
+                    <button type="button" class="btn btn-show-db" onclick="switchMainSection('list')" title="Torna alla Lista della Spesa">
+                        🛒 Mostra Lista
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="openFornitoriModal()" title="Modifica elenco Fornitori (Aldi, Coop, Lidl, Migros)">
+                        🏪 Fornitori
+                    </button>
+                    <button type="button" class="btn btn-pdf" onclick="downloadPurchasesPdf()" title="Salva PDF della Tabella Acquisti">
+                        📄 Salva PDF Acquisti
+                    </button>
+                    <button type="button" class="btn btn-db-sync" onclick="importCurrentListToDb('active')" title="Importa i prodotti con quantità dalla lista attiva">
+                        📥 Importa da Lista Attiva
+                    </button>
+                    <button type="button" class="btn btn-accent" onclick="openAcquistoModal()">
+                        ＋ Nuovo Acquisto
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- =============================================================== -->
+        <!-- SEZIONE 1: LISTA DELLA SPESA                                    -->
+        <!-- =============================================================== -->
+        <div id="section-shopping-list">
+            <div class="info-banner">
+                <div class="stats-pills">
+                    <span class="stat-pill" id="stat-total" onclick="setFilterMode('all')">
+                        📋 Catalogo: <strong id="count-total">0</strong>
+                    </span>
+                    <span class="stat-pill stat-active" id="stat-inlist" onclick="setFilterMode('active')">
+                        🛒 Da acquistare: <strong id="count-active">0</strong>
+                    </span>
+                    <span class="stat-pill stat-orange" id="stat-purchased" onclick="setFilterMode('purchased')">
+                        🟠 Acquistati: <strong id="count-purchased">0</strong>
+                    </span>
+                    <span class="stat-pill stat-money" title="Totale stimato dei prodotti in lista con prezzo">
+                        💶 Totale lista: <strong id="count-list-money">0.00</strong>
+                    </span>
+                </div>
+                <div class="longpress-hint">
+                    💡 <strong>Tieni premuto &gt; 1 secondo</strong> su un prodotto per evidenziarlo in <span class="orange-badge">ARANCIONE (Acquistato)</span> (viene registrato anche nel Database Acquisti).
+                </div>
+            </div>
+
+            <section class="controls-bar">
+                <div class="search-box">
+                    <span class="search-icon">🔍</span>
+                    <input
+                        type="search"
+                        id="search-input"
+                        placeholder="Cerca prodotto (es. Aglio, Mozzarella, Pasta...)"
+                        oninput="onSearchInput(this.value)"
+                    />
+                    <button type="button" id="clear-search-btn" class="clear-search hidden" onclick="clearSearch()">✕</button>
+                </div>
+
+                <div class="segmented-control" role="group" aria-label="Filtro prodotti">
+                    <button type="button" id="filter-btn-all" class="seg-btn active" onclick="setFilterMode('all')">
+                        📋 Tutti
+                    </button>
+                    <button type="button" id="filter-btn-active" class="seg-btn" onclick="setFilterMode('active')">
+                        🛒 Solo in Lista (<span id="seg-count-active">0</span>)
+                    </button>
+                    <button type="button" id="filter-btn-purchased" class="seg-btn" onclick="setFilterMode('purchased')">
+                        🟠 Acquistati (<span id="seg-count-purchased">0</span>)
+                    </button>
+                </div>
+
+                <div class="sort-control">
+                    <label for="sort-mode-select">Ordina:</label>
+                    <select id="sort-mode-select" onchange="setSortMode(this.value)">
+                        <option value="type_alpha">📂 Per Tipo + Alfabetico A-Z (Stile Excel)</option>
+                        <option value="alpha_asc">🔤 Ordine Alfabetico Globale (A → Z)</option>
+                        <option value="alpha_desc">🔤 Ordine Alfabetico Globale (Z → A)</option>
+                    </select>
+                </div>
+            </section>
+
+            <nav id="category-pills" class="category-pills"></nav>
+            <main id="products-container" class="products-container"></main>
+
+            <button type="button" class="fab-add" onclick="openAddProductModal()" title="Aggiungi nuovo prodotto">
+                ＋
+            </button>
+        </div>
+
+        <!-- =============================================================== -->
+        <!-- SEZIONE 2: DATABASE ACQUISTI (Tabella Principale & Raggruppamenti)-->
+        <!-- =============================================================== -->
+        <div id="section-database-acquisti" class="hidden">
+            <!-- KPI RIEPILOGO DATABASE ACQUISTI -->
+            <section class="db-kpi-grid">
+                <div class="db-kpi-card kpi-highlight">
+                    <span class="db-kpi-label">💶 Prezzo Totale Complessivo</span>
+                    <strong class="db-kpi-value" id="db-kpi-total">0.00</strong>
+                </div>
+                <div class="db-kpi-card">
+                    <span class="db-kpi-label">🧾 Voci Registrate</span>
+                    <strong class="db-kpi-value" id="db-kpi-rows">0</strong>
+                </div>
+                <div class="db-kpi-card">
+                    <span class="db-kpi-label">📦 Quantità Totale</span>
+                    <strong class="db-kpi-value" id="db-kpi-qty">0</strong>
+                </div>
+                <div class="db-kpi-card">
+                    <span class="db-kpi-label">📅 Giorni di Acquisto</span>
+                    <strong class="db-kpi-value" id="db-kpi-days">0</strong>
+                </div>
+            </section>
+
+            <!-- BARRA RAGGRUPPAMENTO (GIORNO / MESE / ANNO / FORNITORE / PRODOTTO / TABELLA UNICA) E FILTRI -->
+            <section class="db-controls-panel">
+                <div class="db-grouping-bar">
+                    <span class="db-ctrl-label">Raggruppa per:</span>
+                    <div class="segmented-control" style="flex-wrap:wrap;">
+                        <button type="button" id="grp-btn-day" class="seg-btn active" onclick="setDbGroupBy('day')">
+                            📅 Giorno
+                        </button>
+                        <button type="button" id="grp-btn-month" class="seg-btn" onclick="setDbGroupBy('month')">
+                            🗓️ Mese
+                        </button>
+                        <button type="button" id="grp-btn-year" class="seg-btn" onclick="setDbGroupBy('year')">
+                            📆 Anno
+                        </button>
+                        <button type="button" id="grp-btn-supplier" class="seg-btn" onclick="setDbGroupBy('supplier')">
+                            🏪 Fornitore
+                        </button>
+                        <button type="button" id="grp-btn-product" class="seg-btn" onclick="setDbGroupBy('product')">
+                            📦 Prodotto
+                        </button>
+                        <button type="button" id="grp-btn-none" class="seg-btn" onclick="setDbGroupBy('none')">
+                            📋 Tabella Unica
+                        </button>
+                    </div>
+                </div>
+
+                <div class="db-filters-bar">
+                    <div class="db-filter-item">
+                        <label for="db-filter-supplier">🏪 Fornitore:</label>
+                        <select id="db-filter-supplier" onchange="onDbFilterChange()">
+                            <option value="">Tutti i fornitori</option>
+                        </select>
+                    </div>
+
+                    <div class="db-filter-item">
+                        <label for="db-filter-year">Anno:</label>
+                        <select id="db-filter-year" onchange="onDbFilterChange()">
+                            <option value="">Tutti gli anni</option>
+                        </select>
+                    </div>
+
+                    <div class="db-filter-item">
+                        <label for="db-filter-month">Mese:</label>
+                        <select id="db-filter-month" onchange="onDbFilterChange()">
+                            <option value="">Tutti i mesi</option>
+                            <option value="01">01 — Gennaio</option>
+                            <option value="02">02 — Febbraio</option>
+                            <option value="03">03 — Marzo</option>
+                            <option value="04">04 — Aprile</option>
+                            <option value="05">05 — Maggio</option>
+                            <option value="06">06 — Giugno</option>
+                            <option value="07">07 — Luglio</option>
+                            <option value="08">08 — Agosto</option>
+                            <option value="09">09 — Settembre</option>
+                            <option value="10">10 — Ottobre</option>
+                            <option value="11">11 — Novembre</option>
+                            <option value="12">12 — Dicembre</option>
+                        </select>
+                    </div>
+
+                    <div class="db-filter-item">
+                        <label for="db-filter-date">Giorno:</label>
+                        <input type="date" id="db-filter-date" onchange="onDbFilterChange()" />
+                    </div>
+
+                    <div class="db-filter-item db-filter-search">
+                        <label for="db-search-input">Prodotto:</label>
+                        <input
+                            type="search"
+                            id="db-search-input"
+                            placeholder="Filtra per descrizione prodotto..."
+                            oninput="onDbSearchInput(this.value)"
+                        />
+                    </div>
+
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="resetDbFilters()">
+                        🔄 Tutti
+                    </button>
+                </div>
+            </section>
+
+            <!-- CONTENITORE TABELLA PRINCIPALE ACQUISTI -->
+            <main id="db-table-container" class="products-container"></main>
+
+            <button type="button" class="fab-add" onclick="openAcquistoModal()" title="Registra nuovo acquisto">
+                ＋
+            </button>
+        </div>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- MODALE: NUOVA LISTA                                                 -->
+    <!-- =================================================================== -->
+    <div id="modal-new-list" class="modal-backdrop hidden" onclick="closeModalOnBackdrop(event, 'modal-new-list')">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2>➕ Crea Nuova Lista della Spesa</h2>
+                <button type="button" class="modal-close" onclick="closeModal('modal-new-list')">✕</button>
+            </div>
+            <form onsubmit="submitNewList(event)" class="modal-body">
+                <div class="form-row-2">
+                    <div class="form-group">
+                        <label for="new-list-date">Data della lista:</label>
+                        <input type="date" id="new-list-date" required />
+                    </div>
+                    <div class="form-group">
+                        <label for="new-list-fornitore">🏪 Fornitore:</label>
+                        <select id="new-list-fornitore"></select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="new-list-name">Nome / Nota della lista:</label>
+                    <input type="text" id="new-list-name" placeholder="Es. Spesa Supermercato" value="Lista Supermercato" required />
+                </div>
+                <div class="form-group">
+                    <label for="new-list-mode">Come vuoi iniziare la lista?</label>
+                    <select id="new-list-mode">
+                        <option value="template">📋 Con tutti i prodotti del file Excel (quantità da inserire)</option>
+                        <option value="copy">📑 Duplica i prodotti e le quantità della lista attuale</option>
+                        <option value="empty">✨ Lista vuota (aggiungi tu i singoli prodotti)</option>
+                    </select>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-ghost" onclick="closeModal('modal-new-list')">Annulla</button>
+                    <button type="submit" class="btn btn-primary">Crea Lista</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- MODALE: AGGIUNGI / MODIFICA PRODOTTO NELLA LISTA                    -->
+    <!-- =================================================================== -->
+    <div id="modal-product" class="modal-backdrop hidden" onclick="closeModalOnBackdrop(event, 'modal-product')">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2 id="modal-product-title">➕ Aggiungi Prodotto</h2>
+                <button type="button" class="modal-close" onclick="closeModal('modal-product')">✕</button>
+            </div>
+            <form onsubmit="submitProductModal(event)" class="modal-body">
+                <input type="hidden" id="prod-edit-id" value="" />
+                <div class="form-group">
+                    <label for="prod-name">Nome del prodotto:</label>
+                    <input type="text" id="prod-name" required placeholder="Es. Parmigiano, Mele, Detersivo..." />
+                </div>
+
+                <div class="form-row-2">
+                    <div class="form-group">
+                        <label for="prod-category">Tipo / Reparto:</label>
+                        <select id="prod-category" onchange="onProdCategorySelectChange(this.value)"></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="prod-fornitore">🏪 Fornitore:</label>
+                        <select id="prod-fornitore" onchange="onProdFornitoreSelectChange(this.value)"></select>
+                    </div>
+                </div>
+
+                <div class="form-group hidden" id="new-category-group">
+                    <label for="prod-new-category">Nuovo Tipo / Reparto:</label>
+                    <input type="text" id="prod-new-category" placeholder="Es. SURGELATI" />
+                </div>
+
+                <div class="form-group hidden" id="prod-new-fornitore-group">
+                    <label for="prod-new-fornitore">Nuovo / Modifica Fornitore:</label>
+                    <input type="text" id="prod-new-fornitore" placeholder="Es. Manor, Denner..." />
+                </div>
+
+                <div class="form-row-3">
+                    <div class="form-group">
+                        <label for="prod-quantity">Quantità:</label>
+                        <input type="text" id="prod-quantity" placeholder="Es. 1, 2..." inputmode="decimal" />
+                    </div>
+                    <div class="form-group">
+                        <label for="prod-unit">Unità:</label>
+                        <input type="text" id="prod-unit" list="unit-suggestions" placeholder="Pz, Kg..." />
+                        <datalist id="unit-suggestions">
+                            <option value="Pz"></option>
+                            <option value="Kg"></option>
+                            <option value="g"></option>
+                            <option value="N."></option>
+                            <option value="B"></option>
+                            <option value="M"></option>
+                            <option value="B/M"></option>
+                            <option value="L"></option>
+                            <option value="Conf."></option>
+                        </datalist>
+                    </div>
+                    <div class="form-group">
+                        <label for="prod-unit-price">Prezzo Unit.:</label>
+                        <input type="number" step="0.01" min="0" id="prod-unit-price" placeholder="0.00" />
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="prod-notes">💬 Commento accanto al nome (opzionale, vale solo per questa lista):</label>
+                    <input type="text" id="prod-notes" placeholder="Es. maturi, bio, confezione piccola..." />
+                </div>
+
+                <div class="form-group" id="prod-save-catalog-wrap">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="prod-save-catalog" checked />
+                        <span>Salva anche nel catalogo base per le prossime liste</span>
+                    </label>
+                </div>
+
+                <div class="modal-footer modal-footer-between">
+                    <button type="button" id="btn-delete-product" class="btn btn-danger hidden" onclick="deleteProductFromModal()">
+                        🗑 Elimina
+                    </button>
+                    <div class="modal-footer-right">
+                        <button type="button" class="btn btn-ghost" onclick="closeModal('modal-product')">Annulla</button>
+                        <button type="submit" class="btn btn-primary">Salva Prodotto</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- MODALE: AGGIUNGI / MODIFICA RECORD NELLA TABELLA PRINCIPALE ACQUISTI-->
+    <!-- =================================================================== -->
+    <div id="modal-acquisto" class="modal-backdrop hidden" onclick="closeModalOnBackdrop(event, 'modal-acquisto')">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2 id="modal-acquisto-title">➕ Registra Acquisto nel Database</h2>
+                <button type="button" class="modal-close" onclick="closeModal('modal-acquisto')">✕</button>
+            </div>
+            <form onsubmit="submitAcquistoModal(event)" class="modal-body">
+                <input type="hidden" id="acq-edit-id" value="" />
+
+                <div class="form-group">
+                    <label for="acq-descrizione">Descrizione del prodotto:</label>
+                    <input
+                        type="text"
+                        id="acq-descrizione"
+                        list="catalog-products-datalist"
+                        required
+                        placeholder="Es. Mele, Olio extra-vergine, Pasta..."
+                        oninput="onAcquistoProductInput(this.value)"
+                    />
+                    <datalist id="catalog-products-datalist"></datalist>
+                </div>
+
+                <!-- CASELLA FORNITORE PRECOMPILATA (Aldi, Coop, Lidl, Migros) E MODIFICABILE -->
+                <div class="form-group">
+                    <label for="acq-fornitore-select">🏪 Fornitore (seleziona o modifica):</label>
+                    <div class="inline-input-btn">
+                        <select id="acq-fornitore-select" onchange="onAcqFornitoreSelectChange(this.value)" style="flex:1;"></select>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="openFornitoriModal()" title="Modifica elenco Fornitori">
+                            ✎ Gestisci
+                        </button>
+                    </div>
+                </div>
+                <div class="form-group hidden" id="acq-custom-fornitore-group">
+                    <label for="acq-fornitore-custom">Scrivi nome Fornitore personalizzato:</label>
+                    <input type="text" id="acq-fornitore-custom" placeholder="Es. Denner, Manor, Aligro..." />
+                </div>
+
+                <div class="form-row-2">
+                    <div class="form-group">
+                        <label for="acq-data">Data di acquisto:</label>
+                        <input type="date" id="acq-data" required />
+                    </div>
+                    <div class="form-group">
+                        <label for="acq-unita">Unità di misura:</label>
+                        <input type="text" id="acq-unita" list="unit-suggestions" placeholder="Pz, Kg..." value="Pz" />
+                    </div>
+                </div>
+
+                <div class="form-row-3">
+                    <div class="form-group">
+                        <label for="acq-prezzo-unitario">Prezzo Unitario:</label>
+                        <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            id="acq-prezzo-unitario"
+                            required
+                            placeholder="0.00"
+                            oninput="recalcAcquistoModalTotal()"
+                        />
+                    </div>
+                    <div class="form-group">
+                        <label for="acq-quantita">Quantità:</label>
+                        <input
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            id="acq-quantita"
+                            required
+                            value="1"
+                            oninput="recalcAcquistoModalTotal()"
+                        />
+                    </div>
+                    <div class="form-group">
+                        <label for="acq-prezzo-totale">Prezzo Totale:</label>
+                        <input type="text" id="acq-prezzo-totale" readonly class="readonly-total-input" value="0.00" />
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="acq-note">💬 Commento (se presente):</label>
+                    <input type="text" id="acq-note" placeholder="Es. maturi, bio, marca..." />
+                </div>
+
+                <div class="modal-footer modal-footer-between">
+                    <button type="button" id="btn-delete-acquisto" class="btn btn-danger hidden" onclick="deleteAcquistoFromModal()">
+                        🗑 Elimina
+                    </button>
+                    <div class="modal-footer-right">
+                        <button type="button" class="btn btn-ghost" onclick="closeModal('modal-acquisto')">Annulla</button>
+                        <button type="submit" class="btn btn-primary">Salva nel Database</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- MODALE: GESTIONE ELENCO FORNITORI (Aldi, Coop, Lidl, Migros...)     -->
+    <!-- =================================================================== -->
+    <div id="modal-fornitori" class="modal-backdrop hidden" onclick="closeModalOnBackdrop(event, 'modal-fornitori')">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2>🏪 Gestisci Fornitori Predefiniti</h2>
+                <button type="button" class="modal-close" onclick="closeModal('modal-fornitori')">✕</button>
+            </div>
+            <div class="modal-body">
+                <p style="font-size:0.86rem; color:#475569;">
+                    Elenco fornitori disponibili nelle caselle di controllo (precompilato con <strong>Aldi, Coop, Lidl, Migros</strong> e liberamente modificabile):
+                </p>
+                <div id="fornitori-manage-list" class="fornitori-manage-list"></div>
+
+                <form onsubmit="addNewFornitoreFromModal(event)" class="inline-input-btn" style="margin-top:8px;">
+                    <input type="text" id="new-fornitore-input" placeholder="Aggiungi nuovo fornitore..." required />
+                    <button type="submit" class="btn btn-primary">＋ Aggiungi</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- MODALE: OPZIONI LISTA (RINOMINA, AZZERA, ELIMINA, RIPRISTINA EXCEL) -->
+    <!-- =================================================================== -->
+    <div id="modal-list-menu" class="modal-backdrop hidden" onclick="closeModalOnBackdrop(event, 'modal-list-menu')">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2>⚙️ Gestione Lista Attuale</h2>
+                <button type="button" class="modal-close" onclick="closeModal('modal-list-menu')">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="edit-list-name">Nome della lista:</label>
+                    <div class="inline-input-btn">
+                        <input type="text" id="edit-list-name" />
+                        <button type="button" class="btn btn-primary" onclick="saveListName()">Salva</button>
+                    </div>
+                </div>
+
+                <hr class="divider" />
+
+                <div class="menu-actions-stack">
+                    <button type="button" class="btn btn-secondary btn-block" onclick="clearPurchasedItems()">
+                        🔄 Togli evidenziazione arancione da tutti i prodotti
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-block" onclick="clearAllQuantities()">
+                        🧹 Azzera tutte le quantità di questa lista
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-block" onclick="syncMissingFromExcel()">
+                        📥 Ripristina eventuali prodotti mancanti dal file Excel
+                    </button>
+                    <button type="button" class="btn btn-danger btn-block" onclick="deleteCurrentList()">
+                        🗑 Elimina questa lista
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- MODALE: CONNESSIONE SMARTPHONE IN RETE LOCALE                       -->
+    <!-- =================================================================== -->
+    <div id="modal-lan" class="modal-backdrop hidden" onclick="closeModalOnBackdrop(event, 'modal-lan')">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2>📱 Accesso da Smartphone</h2>
+                <button type="button" class="modal-close" onclick="closeModal('modal-lan')">✕</button>
+            </div>
+            <div class="modal-body lan-modal-body">
+                <p>Assicurati che lo smartphone sia collegato alla <strong>stessa rete Wi-Fi</strong> di questo PC, poi apri il browser del telefono all'indirizzo:</p>
+                <div class="lan-url-display">
+                    <a id="lan-modal-link" href="#" target="_blank" rel="noopener">http://...</a>
+                    <button type="button" class="btn btn-sm btn-primary" onclick="copyLanUrl()">Copia</button>
+                </div>
+                <p class="lan-note">
+                    Ogni modifica alle quantità, ai prezzi, ai fornitori o ai prodotti evidenziati in arancione viene sincronizzata automaticamente tra PC e Smartphone!
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

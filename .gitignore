@@ -1,0 +1,17 @@
+# Dipendenze e ambienti virtuali
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+
+# Database SQLite operativi locali (i prodotti di base sono in seed_catalog.json)
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+data/
+
+# Log e file temporanei di sistema
+*.log
+.DS_Store
+Thumbs.db

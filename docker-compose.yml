@@ -1,0 +1,17 @@
+services:
+  achats:
+    build: .
+    container_name: achats-supermercato
+    restart: unless-stopped
+    # network_mode: host permette al container sul Synology DS1522+ di rispondere
+    # direttamente sia sulla rete locale di casa sia sull'IP 100.x.y.z di Tailscale
+    network_mode: host
+    environment:
+      - NODE_ENV=production
+      - PORT=8090
+      - DB_PATH=/app/data/achats.db
+      - TZ=Europe/Zurich
+    volumes:
+      # Mappa la sottocartella ./data dentro /Webapp/achats (cioè /Webapp/achats/data)
+      # Al primo avvio copia automaticamente achats.db dentro ./data/achats.db
+      - ./data:/app/data

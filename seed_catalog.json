@@ -1,0 +1,566 @@
+{
+  "categories": [
+    {
+      "name": "VERDURA",
+      "icon": "🥬",
+      "color": "#16a34a",
+      "sort_order": 1,
+      "column_group": 1
+    },
+    {
+      "name": "FRUTTA",
+      "icon": "🍎",
+      "color": "#ea580c",
+      "sort_order": 2,
+      "column_group": 2
+    },
+    {
+      "name": "ALIMENTARI",
+      "icon": "🧀",
+      "color": "#2563eb",
+      "sort_order": 3,
+      "column_group": 2
+    },
+    {
+      "name": "PULIZIA E CASA",
+      "icon": "🧼",
+      "color": "#7c3aed",
+      "sort_order": 4,
+      "column_group": 1
+    },
+    {
+      "name": "VARIE",
+      "icon": "📦",
+      "color": "#0ea5e9",
+      "sort_order": 10,
+      "column_group": 1
+    }
+  ],
+  "products": [
+    {
+      "name": "Aglio",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Arance",
+      "category": "FRUTTA",
+      "default_unit": ""
+    },
+    {
+      "name": "Asparagi",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Fragole",
+      "category": "FRUTTA",
+      "default_unit": ""
+    },
+    {
+      "name": "Avocado",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Castagne cotte",
+      "category": "FRUTTA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Basilico pianta",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Lamponi / Ribes",
+      "category": "FRUTTA",
+      "default_unit": ""
+    },
+    {
+      "name": "Broccoli / Romanesco",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Lime",
+      "category": "FRUTTA",
+      "default_unit": ""
+    },
+    {
+      "name": "Broccolo selvatico",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Limoni",
+      "category": "FRUTTA",
+      "default_unit": ""
+    },
+    {
+      "name": "Carciofi",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Mirtilli / More",
+      "category": "FRUTTA",
+      "default_unit": ""
+    },
+    {
+      "name": "Carote",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Pere",
+      "category": "FRUTTA",
+      "default_unit": ""
+    },
+    {
+      "name": "Cavolfiore",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Mele",
+      "category": "FRUTTA",
+      "default_unit": ""
+    },
+    {
+      "name": "Cavoletti di Bruxelles",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Menta",
+      "category": "FRUTTA",
+      "default_unit": ""
+    },
+    {
+      "name": "Cetriolini sott'aceto",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Melone",
+      "category": "FRUTTA",
+      "default_unit": ""
+    },
+    {
+      "name": "Cetrioli",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Champignons",
+      "category": "VERDURA",
+      "default_unit": "B/M"
+    },
+    {
+      "name": "Aceto Bianco / Rosso",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Cipolle",
+      "category": "VERDURA",
+      "default_unit": "B"
+    },
+    {
+      "name": "Aceto Rosso Bono",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Cipolline sott'aceto",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Burratine",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Cocò",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Burrate grandi",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Fagiolini",
+      "category": "VERDURA",
+      "default_unit": ""
+    },
+    {
+      "name": "Burro",
+      "category": "ALIMENTARI",
+      "default_unit": "Kg"
+    },
+    {
+      "name": "Burro alle erbe",
+      "category": "ALIMENTARI",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Finocchi",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Concentrato pomodoro",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Iceberg",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Feta",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Insalata Mesclun",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Gorgonzola",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Cuore du lattuga",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Gelato Vaniglia",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Gelato Stracciatella",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Melanzane",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Ketchup",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Patate grosse",
+      "category": "VERDURA",
+      "default_unit": "Kg"
+    },
+    {
+      "name": "Latte UHT 3,5%",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Patate piccole",
+      "category": "VERDURA",
+      "default_unit": "Kg"
+    },
+    {
+      "name": "Mascarpone",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Peperoni",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Maionese",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Maizena",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Peperoncino rosso rotondo",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Pomodori ramati",
+      "category": "VERDURA",
+      "default_unit": ""
+    },
+    {
+      "name": "Mostarda Maille",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Pomodorini",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Mozzarella Panetto 400gr",
+      "category": "ALIMENTARI",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Pomodorini GIALLI",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Mozzarella 125gr",
+      "category": "ALIMENTARI",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Cuore di bue",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Mozzarelline Galbani 18pz",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Porro",
+      "category": "VERDURA",
+      "default_unit": ""
+    },
+    {
+      "name": "Noci / Nocciole",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Ravanelli",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Noce Moscata",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Rucola",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Olio di girasole",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Pack choi",
+      "category": "VERDURA",
+      "default_unit": "N."
+    },
+    {
+      "name": "Olio extra-vergine",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Polenta Istantanea",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Scalogno",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Pan carré",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Sedano",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Spinaci",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Panna 35%",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Valeriana o Fermentino",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Parmigiano Triangolo",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Pan grattato",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Zucchine",
+      "category": "VERDURA",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Pasta",
+      "category": "ALIMENTARI",
+      "default_unit": "Kg"
+    },
+    {
+      "name": "Pasta Staff",
+      "category": "ALIMENTARI",
+      "default_unit": "Kg"
+    },
+    {
+      "name": "Petto di pollo",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Pecorino",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Detersivo pavimenti",
+      "category": "PULIZIA E CASA",
+      "default_unit": ""
+    },
+    {
+      "name": "Riso",
+      "category": "ALIMENTARI",
+      "default_unit": "Kg"
+    },
+    {
+      "name": "Stecca vaniglia",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Detersivo Piatti",
+      "category": "PULIZIA E CASA",
+      "default_unit": ""
+    },
+    {
+      "name": "Tabasco",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Guanti M",
+      "category": "PULIZIA E CASA",
+      "default_unit": ""
+    },
+    {
+      "name": "Tomme",
+      "category": "ALIMENTARI",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Pagliette di ferro",
+      "category": "PULIZIA E CASA",
+      "default_unit": ""
+    },
+    {
+      "name": "Zucchero",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Sacchi 110",
+      "category": "PULIZIA E CASA",
+      "default_unit": ""
+    },
+    {
+      "name": "Zucchero a velo",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Sacchi 35",
+      "category": "PULIZIA E CASA",
+      "default_unit": ""
+    },
+    {
+      "name": "Zafferano",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Spugne verdi/gialle",
+      "category": "PULIZIA E CASA",
+      "default_unit": ""
+    },
+    {
+      "name": "Uova",
+      "category": "ALIMENTARI",
+      "default_unit": "N."
+    },
+    {
+      "name": "Savoiardi",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Salmone Affumicato",
+      "category": "ALIMENTARI",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Uova di Lompo",
+      "category": "ALIMENTARI",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Salsa di soia",
+      "category": "ALIMENTARI",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Rose",
+      "category": "VARIE",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Pane integrale (Complet)",
+      "category": "ALIMENTARI",
+      "default_unit": "Pz"
+    },
+    {
+      "name": "Camembert",
+      "category": "ALIMENTARI",
+      "default_unit": "Pz"
+    }
+  ]
+}
