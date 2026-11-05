@@ -755,8 +755,21 @@ async function handleRequest(req, res) {
             const row = db
                 .prepare("SELECT id, updated_at, list_date, name, COALESCE(fornitore, 'Aldi') AS fornitore FROM shopping_lists WHERE id = ?")
                 .get(listId);
-            if (!row) return sendJson(res, 404, { error: "Lista non trovata." });
-            return sendJson(res, 200, row);
+            const latest = db
+                .prepare("SELECT id, list_date FROM shopping_lists ORDER BY list_date DESC, id DESC LIMIT 1")
+                .get();
+            if (!row) {
+                return sendJson(res, 200, {
+                    deleted: true,
+                    latest_list_id: latest ? latest.id : null,
+                    latest_list_date: latest ? latest.list_date : null,
+                });
+            }
+            return sendJson(res, 200, {
+                ...row,
+                latest_list_id: latest ? latest.id : row.id,
+                latest_list_date: latest ? latest.list_date : row.list_date,
+            });
         }
 
         // Match /api/lists/:id/pdf

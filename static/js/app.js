@@ -407,16 +407,26 @@ async function switchMainSection(section) {
 // ============================================================================
 // GESTIONE LISTE DELLA SPESA, DATA E FORNITORE
 // ============================================================================
+function sortListsMostRecentFirst(lists) {
+    return [...(lists || [])].sort((a, b) => {
+        const dA = String(a.list_date || "");
+        const dB = String(b.list_date || "");
+        if (dA !== dB) return dB.localeCompare(dA);
+        return (Number(b.id) || 0) - (Number(a.id) || 0);
+    });
+}
+
 async function loadListsAndSelectLatest(preferredListId = null) {
-    const lists = await apiFetch("/api/lists");
-    state.lists = lists;
+    const rawLists = await apiFetch("/api/lists");
+    state.lists = sortListsMostRecentFirst(rawLists);
+    state.lastKnownNewestListId = state.lists[0]?.id || null;
     renderListSelector();
 
+    // All'apertura dell'app (preferredListId === null) seleziona SEMPRE la lista con data più recente (state.lists[0])
     const targetId =
-        preferredListId ||
-        (state.currentList && state.lists.some((l) => l.id === state.currentList.id)
-            ? state.currentList.id
-            : state.lists[0]?.id);
+        preferredListId && state.lists.some((l) => l.id === Number(preferredListId))
+            ? Number(preferredListId)
+            : state.lists[0]?.id;
 
     if (targetId) {
         await loadSingleList(targetId);
@@ -505,7 +515,9 @@ async function onChangeListFornitore(val) {
 
 async function refreshListsSummaryOnly() {
     try {
-        state.lists = await apiFetch("/api/lists");
+        const rawLists = await apiFetch("/api/lists");
+        state.lists = sortListsMostRecentFirst(rawLists);
+        state.lastKnownNewestListId = state.lists[0]?.id || null;
         renderListSelector();
     } catch (e) {
         console.error(e);
@@ -2087,8 +2099,30 @@ function downloadPurchasesPdf() {
 // ============================================================================
 // SINCRONIZZAZIONE AUTOMATICA PC <-> SMARTPHONE
 // ============================================================================
+let visibilitySyncBound = false;
+
 function startRealtimeSync() {
     stopRealtimeSync();
+
+    if (!visibilitySyncBound) {
+        visibilitySyncBound = true;
+        // Quando si riapre lo smartphone o si torna alla scheda, seleziona automaticamente la lista con data più recente
+        document.addEventListener("visibilitychange", async () => {
+            if (document.visibilityState === "visible" && state.user) {
+                try {
+                    await loadListsAndSelectLatest();
+                } catch (_) {}
+            }
+        });
+        window.addEventListener("pageshow", async () => {
+            if (state.user) {
+                try {
+                    await loadListsAndSelectLatest();
+                } catch (_) {}
+            }
+        });
+    }
+
     state.syncTimer = setInterval(async () => {
         if (!state.currentList) return;
         const activeTag = document.activeElement?.tagName;
@@ -2098,6 +2132,15 @@ function startRealtimeSync() {
         try {
             if (state.activeSection === "list") {
                 const ver = await apiFetch(`/api/lists/${state.currentList.id}/version`);
+                if (ver.deleted && ver.latest_list_id) {
+                    await loadListsAndSelectLatest(ver.latest_list_id);
+                    return;
+                }
+                if (ver.latest_list_id && state.lastKnownNewestListId && ver.latest_list_id !== state.lastKnownNewestListId) {
+                    await loadListsAndSelectLatest(ver.latest_list_id);
+                    await refreshDbCounterBadge();
+                    return;
+                }
                 if (ver.updated_at && ver.updated_at !== state.currentList.updated_at) {
                     await loadSingleList(state.currentList.id);
                     await refreshListsSummaryOnly();
