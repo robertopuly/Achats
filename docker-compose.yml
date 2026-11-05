@@ -12,6 +12,11 @@ services:
       - DB_PATH=/app/data/achats.db
       - TZ=Europe/Zurich
     volumes:
-      # Mappa la sottocartella ./data dentro /Webapp/achats (cioè /Webapp/achats/data)
-      # Al primo avvio copia automaticamente achats.db dentro ./data/achats.db
+      # 1. Database SQLite persistente (non viene mai sovrascritto dagli aggiornamenti)
       - ./data:/app/data
+      # 2. Collegamento diretto ai file dell'app per aggiornamenti istantanei senza dover rifare "Build"
+      - ./templates:/app/templates
+      - ./static:/app/static
+      - ./server.js:/app/server.js
+      - ./pdf_generator.js:/app/pdf_generator.js
+      - ./seed_catalog.json:/app/seed_catalog.json
