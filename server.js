@@ -781,6 +781,7 @@ async function handleRequest(req, res) {
 
             const filterMode = urlObj.searchParams.get("filter") || "all";
             const selectedCategory = (urlObj.searchParams.get("category") || "ALL").toUpperCase();
+            const selectedSupplier = (urlObj.searchParams.get("fornitore") || "ALL").trim();
             const sortMode = urlObj.searchParams.get("sort") || "type_alpha";
             const searchQuery = (urlObj.searchParams.get("q") || "").trim().toLowerCase();
 
@@ -792,6 +793,12 @@ async function handleRequest(req, res) {
             const filteredItems = payload.items.filter((item) => {
                 if (selectedCategory !== "ALL" && String(item.category || "").toUpperCase() !== selectedCategory) {
                     return false;
+                }
+                if (selectedSupplier && selectedSupplier !== "ALL") {
+                    const itemSupp = String(item.fornitore || payload.list?.fornitore || "Aldi").trim();
+                    if (itemSupp.toLowerCase() !== selectedSupplier.toLowerCase()) {
+                        return false;
+                    }
                 }
                 if (filterMode === "active" && !isItemActive(item)) {
                     return false;

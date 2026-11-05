@@ -1580,6 +1580,57 @@ body.is-smartphone .pc-only {
     color: #fff;
 }
 
+/* Riga fornitore modificabile sotto il nome del prodotto */
+.product-sub-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 2px;
+}
+
+.product-supplier-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    cursor: pointer;
+}
+
+.product-supplier-icon {
+    font-size: 0.72rem;
+    line-height: 1;
+}
+
+.product-supplier-select {
+    appearance: auto;
+    border: 1px solid #cbd5e1;
+    background: #f8fafc;
+    color: #1e40af;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 5px;
+    cursor: pointer;
+    height: 22px;
+}
+
+.product-supplier-select:hover,
+.product-supplier-select:focus {
+    border-color: #3b82f6;
+    background: #eff6ff;
+    outline: none;
+}
+
+.product-row.is-purchased .product-supplier-select {
+    background: rgba(255, 255, 255, 0.92);
+    color: #9a3412;
+    border-color: rgba(255, 255, 255, 0.95);
+}
+
+.product-row.is-purchased .product-supplier-select option {
+    color: #0f172a;
+    background: #ffffff;
+}
+
 /* Commento accanto al nome prodotto (solo per la lista attuale) */
 .btn-add-comment {
     border: 1px dashed #cbd5e1;

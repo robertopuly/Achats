@@ -18,6 +18,7 @@ const state = {
     items: [],
     filterMode: "all",       // 'all' | 'active' | 'purchased'
     selectedCategory: "ALL", // 'ALL' oppure nome categoria (es. 'VERDURA')
+    selectedSupplier: "ALL", // 'ALL' oppure nome fornitore (es. 'Aldi', 'Coop', 'Lidl', 'Migros')
     sortMode: "type_alpha",  // 'type_alpha' | 'alpha_asc' | 'alpha_desc'
     searchQuery: "",
     syncTimer: null,
@@ -272,22 +273,24 @@ function getFornitoriNames(extraName = "") {
 }
 
 function renderAllFornitoriSelects() {
-    // 1. Selettore fornitore della lista attiva in alto
+    // 1. Filtro fornitore nella barra in alto della Lista della Spesa
     const listFornSel = document.getElementById("current-list-fornitore");
     if (listFornSel) {
-        const currentVal = state.currentList?.fornitore || "Aldi";
-        const names = getFornitoriNames(currentVal);
-        listFornSel.innerHTML = "";
+        const currentFilter = state.selectedSupplier || "ALL";
+        const names = getFornitoriNames(currentFilter !== "ALL" ? currentFilter : "");
+        listFornSel.innerHTML = `<option value="ALL">Tutti i fornitori</option>`;
         for (const n of names) {
             const opt = document.createElement("option");
             opt.value = n;
             opt.textContent = n;
-            if (n.toLowerCase() === currentVal.toLowerCase()) opt.selected = true;
+            if (currentFilter !== "ALL" && n.toLowerCase() === currentFilter.toLowerCase()) {
+                opt.selected = true;
+            }
             listFornSel.appendChild(opt);
         }
         const editOpt = document.createElement("option");
         editOpt.value = "__MANAGE__";
-        editOpt.textContent = "✎ Modifica / Nuovo fornitore...";
+        editOpt.textContent = "✎ Gestisci fornitori...";
         listFornSel.appendChild(editOpt);
     }
 
@@ -492,25 +495,13 @@ async function onChangeListDate(newDate) {
 }
 
 async function onChangeListFornitore(val) {
-    if (!state.currentList) return;
     if (val === "__MANAGE__") {
         renderAllFornitoriSelects();
         openFornitoriModal();
         return;
     }
-    try {
-        const data = await apiFetch(`/api/lists/${state.currentList.id}`, {
-            method: "PUT",
-            body: JSON.stringify({ fornitore: val }),
-        });
-        state.currentList = data.list;
-        state.items = data.items;
-        await refreshListsSummaryOnly();
-        renderAll();
-        showToast(`Fornitore della lista impostato su "${val}"`, "success");
-    } catch (err) {
-        showToast(err.message);
-    }
+    state.selectedSupplier = val || "ALL";
+    renderAll();
 }
 
 async function refreshListsSummaryOnly() {
@@ -763,6 +754,12 @@ function getFilteredItems() {
         if (state.selectedCategory !== "ALL" && (item.category || "").toUpperCase() !== state.selectedCategory) {
             return false;
         }
+        if (state.selectedSupplier && state.selectedSupplier !== "ALL") {
+            const itemSupp = (item.fornitore || state.currentList?.fornitore || "Aldi").trim();
+            if (itemSupp.toLowerCase() !== state.selectedSupplier.toLowerCase()) {
+                return false;
+            }
+        }
         if (state.filterMode === "active" && !isItemActive(item)) {
             return false;
         }
@@ -930,8 +927,19 @@ function buildProductRow(item, showCatBadge = false) {
     const unitPriceNum = Number(item.unit_price || 0);
     const qtyNum = parseFloat(String(item.quantity || "0").replace(",", ".")) || 0;
     const rowTotal = qtyNum > 0 && unitPriceNum > 0 ? (qtyNum * unitPriceNum).toFixed(2) : "";
-    const suppName = item.fornitore || state.currentList?.fornitore || "";
+    const suppName = (item.fornitore || state.currentList?.fornitore || "Aldi").trim();
     const commentText = String(item.notes || "").trim();
+
+    const fornOptions = getFornitoriNames(suppName);
+    const suppOptionsHtml =
+        fornOptions
+            .map(
+                (fn) =>
+                    `<option value="${escapeHtmlAttr(fn)}" ${
+                        fn.toLowerCase() === suppName.toLowerCase() ? "selected" : ""
+                    }>${escapeHtml(fn)}</option>`
+            )
+            .join("") + `<option value="__MANAGE__">✎ Altro fornitore...</option>`;
 
     const commentHtml = commentText
         ? `<span class="comment-pill" data-action="comment-edit" title="Clicca per modificare il commento (vale solo per questa lista)">
@@ -948,8 +956,15 @@ function buildProductRow(item, showCatBadge = false) {
                 <span class="comment-slot">${commentHtml}</span>
                 ${purchased ? `<span class="purchased-pill">✓ Acquistato</span>` : ""}
                 ${showCatBadge ? `<span class="cat-mini-badge">${escapeHtml(item.category)}</span>` : ""}
-                ${active && suppName ? `<span class="supplier-mini-badge" title="Fornitore">${escapeHtml(suppName)}</span>` : ""}
                 ${rowTotal ? `<span class="row-total-badge" title="Prezzo Totale (Q.tà × Prezzo Unit.)">= ${rowTotal}</span>` : ""}
+            </div>
+            <div class="product-sub-line">
+                <label class="product-supplier-wrap" title="Fornitore del prodotto (modificabile)">
+                    <span class="product-supplier-icon">🏪</span>
+                    <select class="product-supplier-select" aria-label="Fornitore per ${escapeHtmlAttr(item.name)}">
+                        ${suppOptionsHtml}
+                    </select>
+                </label>
             </div>
         </div>
         <div class="product-controls">
@@ -1049,8 +1064,44 @@ function buildProductRow(item, showCatBadge = false) {
         });
     }
 
+    // Selettore fornitore direttamente sotto il nome del prodotto
+    const suppSelect = row.querySelector(".product-supplier-select");
+    if (suppSelect) {
+        suppSelect.addEventListener("click", (e) => e.stopPropagation());
+        suppSelect.addEventListener("change", (e) => {
+            e.stopPropagation();
+            const val = suppSelect.value;
+            if (val === "__MANAGE__") {
+                suppSelect.value = suppName;
+                openFornitoriModal();
+                return;
+            }
+            saveItemSupplierDirect(item.id, val);
+        });
+    }
+
     attachLongPressHandler(row, item.id);
     return row;
+}
+
+async function saveItemSupplierDirect(itemId, newFornitore) {
+    const item = state.items.find((i) => i.id === itemId);
+    if (!item) return;
+
+    const cleanForn = String(newFornitore || "Aldi").trim() || "Aldi";
+    item.fornitore = cleanForn;
+    renderAll();
+
+    try {
+        const updated = await apiFetch(`/api/items/${itemId}`, {
+            method: "PUT",
+            body: JSON.stringify({ fornitore: cleanForn }),
+        });
+        Object.assign(item, updated);
+        showToast(`🏪 Fornitore di "${item.name}" impostato su ${cleanForn}`, "success");
+    } catch (err) {
+        showToast(err.message);
+    }
 }
 
 function openInlineCommentEditor(slotEl, item) {
@@ -2057,6 +2108,7 @@ function downloadCurrentViewPdf() {
     const params = new URLSearchParams({
         filter: state.filterMode || "all",
         category: state.selectedCategory || "ALL",
+        fornitore: state.selectedSupplier || "ALL",
         sort: state.sortMode || "type_alpha",
         q: state.searchQuery || "",
     });
