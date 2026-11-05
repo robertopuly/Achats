@@ -1584,8 +1584,9 @@ body.is-smartphone .pc-only {
 .product-sub-line {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-top: 2px;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 3px;
 }
 
 .product-supplier-wrap {
@@ -1605,12 +1606,14 @@ body.is-smartphone .pc-only {
     border: 1px solid #cbd5e1;
     background: #f8fafc;
     color: #1e40af;
-    font-size: 0.75rem;
+    font-size: 0.74rem;
     font-weight: 700;
-    padding: 1px 6px;
+    padding: 1px 4px;
     border-radius: 5px;
     cursor: pointer;
-    height: 22px;
+    height: 21px;
+    width: auto;
+    max-width: 78px;
 }
 
 .product-supplier-select:hover,
@@ -1801,17 +1804,78 @@ body.is-smartphone .pc-only {
     }
 
     .product-row {
-        padding: 10px 10px;
+        padding: 8px 8px;
+        gap: 6px;
+    }
+
+    .product-title-line {
+        gap: 5px;
+        flex-wrap: nowrap;
+    }
+
+    .product-name {
+        font-size: 0.9rem;
+        line-height: 1.2;
+    }
+
+    .purchased-pill {
+        padding: 1px 5px;
+        font-size: 0.68rem;
+        flex-shrink: 0;
+    }
+
+    .product-sub-line {
+        gap: 4px;
+        margin-top: 2px;
+    }
+
+    .product-supplier-select {
+        max-width: 68px;
+        font-size: 0.7rem;
+        height: 20px;
+        padding: 0 3px;
+    }
+
+    .product-controls {
+        gap: 3px;
+    }
+
+    .price-input {
+        width: 44px;
+        height: 28px;
+        font-size: 0.76rem;
+        padding: 1px 3px;
+    }
+
+    .qty-stepper {
+        gap: 2px;
     }
 
     .qty-btn {
-        width: 34px;
-        height: 34px;
+        width: 26px;
+        height: 28px;
+        font-size: 0.95rem;
     }
 
     .qty-input {
-        width: 48px;
-        height: 34px;
+        width: 34px;
+        height: 28px;
+        font-size: 0.84rem;
+        padding: 1px 2px;
+    }
+
+    .unit-badge {
+        min-width: 24px;
+        height: 28px;
+        padding: 0 4px;
+        font-size: 0.7rem;
+    }
+
+    .row-action-btn {
+        width: 22px;
+        height: 28px;
+        padding: 0;
+        font-size: 0.82rem;
     }
 
     .form-row-2,

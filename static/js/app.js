@@ -939,7 +939,7 @@ function buildProductRow(item, showCatBadge = false) {
                         fn.toLowerCase() === suppName.toLowerCase() ? "selected" : ""
                     }>${escapeHtml(fn)}</option>`
             )
-            .join("") + `<option value="__MANAGE__">✎ Altro fornitore...</option>`;
+            .join("") + `<option value="__MANAGE__">＋ Altro...</option>`;
 
     const commentHtml = commentText
         ? `<span class="comment-pill" data-action="comment-edit" title="Clicca per modificare il commento (vale solo per questa lista)">
@@ -952,11 +952,9 @@ function buildProductRow(item, showCatBadge = false) {
         <div class="longpress-progress"></div>
         <div class="product-info">
             <div class="product-title-line">
-                <span class="product-name">${escapeHtml(item.name)}</span>
-                <span class="comment-slot">${commentHtml}</span>
                 ${purchased ? `<span class="purchased-pill">✓<span class="pc-only"> Acquistato</span></span>` : ""}
+                <span class="product-name">${escapeHtml(item.name)}</span>
                 ${showCatBadge ? `<span class="cat-mini-badge">${escapeHtml(item.category)}</span>` : ""}
-                ${rowTotal ? `<span class="row-total-badge" title="Prezzo Totale (Q.tà × Prezzo Unit.)">= ${rowTotal}</span>` : ""}
             </div>
             <div class="product-sub-line">
                 <label class="product-supplier-wrap" title="Fornitore del prodotto (modificabile)">
@@ -965,6 +963,8 @@ function buildProductRow(item, showCatBadge = false) {
                         ${suppOptionsHtml}
                     </select>
                 </label>
+                <span class="comment-slot">${commentHtml}</span>
+                ${rowTotal ? `<span class="row-total-badge" title="Prezzo Totale (Q.tà × Prezzo Unit.)">= ${rowTotal}</span>` : ""}
             </div>
         </div>
         <div class="product-controls">
