@@ -954,7 +954,7 @@ function buildProductRow(item, showCatBadge = false) {
             <div class="product-title-line">
                 <span class="product-name">${escapeHtml(item.name)}</span>
                 <span class="comment-slot">${commentHtml}</span>
-                ${purchased ? `<span class="purchased-pill">✓ Acquistato</span>` : ""}
+                ${purchased ? `<span class="purchased-pill">✓<span class="pc-only"> Acquistato</span></span>` : ""}
                 ${showCatBadge ? `<span class="cat-mini-badge">${escapeHtml(item.category)}</span>` : ""}
                 ${rowTotal ? `<span class="row-total-badge" title="Prezzo Totale (Q.tà × Prezzo Unit.)">= ${rowTotal}</span>` : ""}
             </div>
