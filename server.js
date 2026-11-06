@@ -162,6 +162,94 @@ ensureColumn("catalog_products", "last_fornitore", "TEXT DEFAULT ''");
 
 db.exec("CREATE INDEX IF NOT EXISTS idx_acquisti_fornitore ON acquisti(fornitore);");
 
+// 4. Tabella prezzi per singolo (Prodotto + Fornitore) così ogni supermercato mantiene il suo prezzo reale
+db.exec(`
+    CREATE TABLE IF NOT EXISTS product_supplier_prices (
+        product_name TEXT NOT NULL COLLATE NOCASE,
+        fornitore TEXT NOT NULL COLLATE NOCASE,
+        unit_price REAL NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (product_name, fornitore)
+    );
+`);
+
+function saveSupplierPrice(productName, fornitore, unitPrice) {
+    const cleanName = String(productName || "").trim();
+    const cleanForn = String(fornitore || "Aldi").trim() || "Aldi";
+    const price = roundMoney(parseNumber(unitPrice, 0));
+    if (!cleanName || price <= 0) return;
+    const ts = new Date().toISOString().slice(0, 19);
+    db.prepare(
+        `INSERT INTO product_supplier_prices (product_name, fornitore, unit_price, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(product_name, fornitore) DO UPDATE SET unit_price = excluded.unit_price, updated_at = excluded.updated_at`
+    ).run(cleanName, cleanForn, price, ts);
+}
+
+function getSupplierPrice(productName, fornitore) {
+    const cleanName = String(productName || "").trim();
+    const cleanForn = String(fornitore || "Aldi").trim() || "Aldi";
+    if (!cleanName) return 0;
+
+    // 1. Cerca nella tabella prezzi (Prodotto + Fornitore)
+    const direct = db
+        .prepare(
+            "SELECT unit_price FROM product_supplier_prices WHERE LOWER(product_name) = LOWER(?) AND LOWER(fornitore) = LOWER(?)"
+        )
+        .get(cleanName, cleanForn);
+    if (direct && Number(direct.unit_price) > 0) {
+        return roundMoney(direct.unit_price);
+    }
+
+    // 2. Cerca nell'ultimo acquisto registrato nel database per quello specifico fornitore
+    const fromAcq = db
+        .prepare(
+            `SELECT prezzo_unitario FROM acquisti
+             WHERE LOWER(descrizione_prodotto) = LOWER(?) AND LOWER(fornitore) = LOWER(?) AND prezzo_unitario > 0
+             ORDER BY data_acquisto DESC, id DESC LIMIT 1`
+        )
+        .get(cleanName, cleanForn);
+    if (fromAcq && Number(fromAcq.prezzo_unitario) > 0) {
+        const p = roundMoney(fromAcq.prezzo_unitario);
+        saveSupplierPrice(cleanName, cleanForn, p);
+        return p;
+    }
+
+    // 3. Cerca nelle liste precedenti per quello specifico fornitore
+    const fromItems = db
+        .prepare(
+            `SELECT unit_price FROM shopping_list_items
+             WHERE LOWER(name) = LOWER(?) AND LOWER(fornitore) = LOWER(?) AND unit_price > 0
+             ORDER BY id DESC LIMIT 1`
+        )
+        .get(cleanName, cleanForn);
+    if (fromItems && Number(fromItems.unit_price) > 0) {
+        const p = roundMoney(fromItems.unit_price);
+        saveSupplierPrice(cleanName, cleanForn, p);
+        return p;
+    }
+
+    return 0;
+}
+
+// Popola inizialmente product_supplier_prices dallo storico esistente
+(function backfillSupplierPrices() {
+    try {
+        const itemRows = db
+            .prepare("SELECT name, COALESCE(NULLIF(fornitore, ''), 'Aldi') AS forn, unit_price FROM shopping_list_items WHERE unit_price > 0 ORDER BY id ASC")
+            .all();
+        for (const r of itemRows) {
+            saveSupplierPrice(r.name, r.forn, r.unit_price);
+        }
+        const acqRows = db
+            .prepare("SELECT descrizione_prodotto, COALESCE(NULLIF(fornitore, ''), 'Aldi') AS forn, prezzo_unitario FROM acquisti WHERE prezzo_unitario > 0 ORDER BY data_acquisto ASC, id ASC")
+            .all();
+        for (const r of acqRows) {
+            saveSupplierPrice(r.descrizione_prodotto, r.forn, r.prezzo_unitario);
+        }
+    } catch (_) {}
+})();
+
 // Popolamento automatico categorie e catalogo iniziale se il database è nuovo
 (function seedInitialDatabaseIfEmpty() {
     const seedPath = path.join(BASE_DIR, "seed_catalog.json");
@@ -785,6 +873,11 @@ async function handleRequest(req, res) {
             const source_list_id = data.source_list_id;
             const ts = nowIso();
 
+            // Individua la lista più recente (o la source_list_id) da cui riprendere prodotti e fornitori aggiornati
+            const latestSourceList = source_list_id
+                ? db.prepare("SELECT id FROM shopping_lists WHERE id = ?").get(source_list_id)
+                : db.prepare("SELECT id FROM shopping_lists ORDER BY list_date DESC, id DESC LIMIT 1").get();
+
             const info = db
                 .prepare("INSERT INTO shopping_lists (name, list_date, fornitore, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
                 .run(name, list_date, fornitore, currentUser.id, ts, ts);
@@ -796,14 +889,16 @@ async function handleRequest(req, res) {
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
             );
 
-            if (mode === "copy" && source_list_id) {
+            if (mode === "copy" && latestSourceList) {
                 const srcItems = db
                     .prepare(
-                        "SELECT product_id, name, category, unit, quantity, unit_price, total_price, fornitore, in_list FROM shopping_list_items WHERE list_id = ?"
+                        "SELECT product_id, name, category, unit, quantity, unit_price, total_price, fornitore, in_list FROM shopping_list_items WHERE list_id = ? ORDER BY category ASC, name COLLATE NOCASE ASC"
                     )
-                    .all(source_list_id);
+                    .all(latestSourceList.id);
                 for (const it of srcItems) {
-                    // In una lista nuova il commento (notes) deve sempre sparire ('')
+                    const itemForn = ensureSupplierExists(it.fornitore || "Aldi");
+                    const itemPrice = getSupplierPrice(it.name, itemForn) || roundMoney(parseNumber(it.unit_price, 0));
+                    const qtyNum = parseNumber(it.quantity, 0);
                     insertItem.run(
                         newListId,
                         it.product_id,
@@ -811,31 +906,76 @@ async function handleRequest(req, res) {
                         it.category,
                         it.unit,
                         it.quantity,
-                        it.unit_price || 0,
-                        it.total_price || 0,
-                        it.fornitore || fornitore,
+                        itemPrice,
+                        roundMoney(qtyNum * itemPrice),
+                        itemForn,
                         it.in_list,
                         "",
                         ts
                     );
                 }
             } else if (mode !== "empty") {
+                // Riprende la lista aggiornata (dalla lista più recente + eventuali prodotti del catalogo base),
+                // mantenendo il fornitore di ciascun prodotto, azzerando le quantità e applicando l'ultimo prezzo per quel fornitore
+                const mergedMap = new Map();
+
+                if (latestSourceList) {
+                    const prevItems = db
+                        .prepare(
+                            "SELECT product_id, name, category, unit, unit_price, fornitore FROM shopping_list_items WHERE list_id = ? ORDER BY id ASC"
+                        )
+                        .all(latestSourceList.id);
+                    for (const it of prevItems) {
+                        const key = String(it.name || "").trim().toLowerCase();
+                        if (!key) continue;
+                        const itemForn = ensureSupplierExists(it.fornitore || "Aldi");
+                        const latestPriceForSupplier =
+                            getSupplierPrice(it.name, itemForn) || roundMoney(parseNumber(it.unit_price, 0));
+                        mergedMap.set(key, {
+                            product_id: it.product_id,
+                            name: it.name,
+                            category: it.category || "ALIMENTARI",
+                            unit: it.unit || "",
+                            fornitore: itemForn,
+                            unit_price: latestPriceForSupplier,
+                        });
+                    }
+                }
+
                 const prods = db
                     .prepare(
                         "SELECT id, name, category, default_unit, COALESCE(last_unit_price, 0) AS last_unit_price, COALESCE(last_fornitore, '') AS last_fornitore FROM catalog_products ORDER BY category ASC, name COLLATE NOCASE ASC"
                     )
                     .all();
                 for (const p of prods) {
+                    const key = String(p.name || "").trim().toLowerCase();
+                    if (!key) continue;
+                    if (!mergedMap.has(key)) {
+                        const itemForn = ensureSupplierExists(p.last_fornitore || "Aldi");
+                        const latestPriceForSupplier =
+                            getSupplierPrice(p.name, itemForn) || roundMoney(parseNumber(p.last_unit_price, 0));
+                        mergedMap.set(key, {
+                            product_id: p.id,
+                            name: p.name,
+                            category: p.category || "ALIMENTARI",
+                            unit: p.default_unit || "",
+                            fornitore: itemForn,
+                            unit_price: latestPriceForSupplier,
+                        });
+                    }
+                }
+
+                for (const entry of mergedMap.values()) {
                     insertItem.run(
                         newListId,
-                        p.id,
-                        p.name,
-                        p.category,
-                        p.default_unit,
+                        entry.product_id,
+                        entry.name,
+                        entry.category,
+                        entry.unit,
                         "",
-                        p.last_unit_price || 0,
+                        entry.unit_price || 0,
                         0,
-                        p.last_fornitore || fornitore,
+                        entry.fornitore,
                         0,
                         "",
                         ts
@@ -991,16 +1131,20 @@ async function handleRequest(req, res) {
             const category = String(data.category || "ALIMENTARI").trim().toUpperCase();
             const unit = String(data.unit || "").trim();
             const quantity = String(data.quantity ?? "").trim();
-            const unit_price = roundMoney(parseNumber(data.unit_price, 0));
+            const fornitore = ensureSupplierExists(data.fornitore || parentList?.fornitore || "Aldi");
+            const rawInputPrice = roundMoney(parseNumber(data.unit_price, 0));
+            const unit_price = rawInputPrice > 0 ? rawInputPrice : roundMoney(getSupplierPrice(name, fornitore));
             const qtyNum = parseNumber(quantity, 0);
             const total_price = roundMoney(qtyNum * unit_price);
-            const fornitore = ensureSupplierExists(data.fornitore || parentList?.fornitore || "Aldi");
             const save_to_catalog = data.save_to_catalog !== false;
             const notes = String(data.notes || "").trim();
 
             if (!name) return sendJson(res, 400, { error: "Inserisci il nome del prodotto." });
 
             const ts = nowIso();
+            if (unit_price > 0) {
+                saveSupplierPrice(name, fornitore, unit_price);
+            }
             db.prepare(
                 "INSERT OR IGNORE INTO categories (name, icon, color, sort_order, column_group) VALUES (?, '📦', '#0ea5e9', 10, 1)"
             ).run(category);
@@ -1119,11 +1263,32 @@ async function handleRequest(req, res) {
                 const unit = "unit" in data ? String(data.unit).trim() : item.unit;
                 const notes = "notes" in data ? String(data.notes).trim() : item.notes;
                 const quantity = "quantity" in data ? String(data.quantity ?? "").trim() : item.quantity;
-                const unit_price = "unit_price" in data ? roundMoney(parseNumber(data.unit_price, 0)) : roundMoney(parseNumber(item.unit_price, 0));
+
+                const oldFornitore = (item.fornitore || parentList?.fornitore || "Aldi").trim();
                 const fornitore =
                     "fornitore" in data && String(data.fornitore || "").trim()
                         ? ensureSupplierExists(data.fornitore)
-                        : item.fornitore || parentList?.fornitore || "Aldi";
+                        : oldFornitore;
+
+                const supplierChanged = fornitore.toLowerCase() !== oldFornitore.toLowerCase();
+                let unit_price = roundMoney(parseNumber(item.unit_price, 0));
+
+                if ("unit_price" in data) {
+                    const incomingPrice = roundMoney(parseNumber(data.unit_price, 0));
+                    if (supplierChanged && incomingPrice === roundMoney(parseNumber(item.unit_price, 0))) {
+                        // Se nel modale è stato cambiato il fornitore lasciando invariato il vecchio prezzo, carica il prezzo reale del nuovo fornitore
+                        unit_price = getSupplierPrice(name, fornitore);
+                    } else {
+                        unit_price = incomingPrice;
+                    }
+                } else if (supplierChanged) {
+                    // Se cambia il fornitore (es. da Aldi a Coop), applica l'ultimo prezzo registrato per quel fornitore (o 0 se mai acquistato lì)
+                    unit_price = getSupplierPrice(name, fornitore);
+                }
+
+                if (unit_price > 0) {
+                    saveSupplierPrice(name, fornitore, unit_price);
+                }
 
                 const qtyNum = parseNumber(quantity, 0);
                 const total_price = roundMoney(qtyNum * unit_price);
@@ -1290,6 +1455,7 @@ async function handleRequest(req, res) {
             db.prepare(
                 "UPDATE catalog_products SET last_fornitore = ?, last_unit_price = CASE WHEN ? > 0 THEN ? ELSE last_unit_price END WHERE LOWER(name) = LOWER(?)"
             ).run(fornitore, prezzo_unitario, prezzo_unitario, descrizione_prodotto);
+            saveSupplierPrice(descrizione_prodotto, fornitore, prezzo_unitario);
 
             const created = db.prepare("SELECT * FROM acquisti WHERE id = ?").get(Number(info.lastInsertRowid));
             return sendJson(res, 200, created);
@@ -1493,6 +1659,7 @@ async function handleRequest(req, res) {
                 db.prepare(
                     "UPDATE catalog_products SET last_fornitore = ?, last_unit_price = CASE WHEN ? > 0 THEN ? ELSE last_unit_price END WHERE LOWER(name) = LOWER(?)"
                 ).run(fornitore, prezzo_unitario, prezzo_unitario, descrizione_prodotto);
+                saveSupplierPrice(descrizione_prodotto, fornitore, prezzo_unitario);
 
                 const updated = db.prepare("SELECT * FROM acquisti WHERE id = ?").get(acqId);
                 return sendJson(res, 200, updated);

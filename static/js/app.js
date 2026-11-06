@@ -446,8 +446,7 @@ function renderListSelector() {
         const activeCount = l.active_items || 0;
         const purchasedCount = l.purchased_items || 0;
         const dateFormatted = formatDateIT(l.list_date);
-        const forn = l.fornitore ? ` [${l.fornitore}]` : "";
-        opt.textContent = `${dateFormatted}${forn} — ${l.name} (${activeCount} in lista, ${purchasedCount} acq.)`;
+        opt.textContent = `${dateFormatted} — ${l.name} (${activeCount} in lista, ${purchasedCount} acq.)`;
         if (state.currentList && state.currentList.id === l.id) {
             opt.selected = true;
         }
@@ -519,24 +518,12 @@ function openNewListModal() {
     document.getElementById("new-list-date").value = todayISO();
     document.getElementById("new-list-name").value = "Lista Supermercato";
     document.getElementById("new-list-mode").value = "template";
-
-    const sel = document.getElementById("new-list-fornitore");
-    if (sel) {
-        sel.innerHTML = "";
-        for (const n of getFornitoriNames(state.currentList?.fornitore || "Aldi")) {
-            const opt = document.createElement("option");
-            opt.value = n;
-            opt.textContent = n;
-            sel.appendChild(opt);
-        }
-    }
     openModal("modal-new-list");
 }
 
 async function submitNewList(e) {
     e.preventDefault();
     const list_date = document.getElementById("new-list-date").value || todayISO();
-    const fornitore = document.getElementById("new-list-fornitore").value || "Aldi";
     const name = document.getElementById("new-list-name").value.trim() || "Lista Supermercato";
     const mode = document.getElementById("new-list-mode").value;
 
@@ -546,7 +533,6 @@ async function submitNewList(e) {
             body: JSON.stringify({
                 name,
                 list_date,
-                fornitore,
                 mode,
                 source_list_id: state.currentList ? state.currentList.id : null,
             }),
@@ -556,11 +542,12 @@ async function submitNewList(e) {
         state.categories = data.categories;
         state.items = data.items;
         state.filterMode = "all";
+        state.selectedSupplier = "ALL";
         updateFilterButtonsUI();
         await refreshListsSummaryOnly();
         renderAllFornitoriSelects();
         renderAll();
-        showToast(`Nuova lista creata (${formatDateIT(list_date)} — ${fornitore})!`, "success");
+        showToast(`Nuova lista creata (${formatDateIT(list_date)})!`, "success");
     } catch (err) {
         showToast(err.message);
     }

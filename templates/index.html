@@ -369,15 +369,9 @@
                 <button type="button" class="modal-close" onclick="closeModal('modal-new-list')">✕</button>
             </div>
             <form onsubmit="submitNewList(event)" class="modal-body">
-                <div class="form-row-2">
-                    <div class="form-group">
-                        <label for="new-list-date">Data della lista:</label>
-                        <input type="date" id="new-list-date" required />
-                    </div>
-                    <div class="form-group">
-                        <label for="new-list-fornitore">🏪 Fornitore:</label>
-                        <select id="new-list-fornitore"></select>
-                    </div>
+                <div class="form-group">
+                    <label for="new-list-date">Data della lista:</label>
+                    <input type="date" id="new-list-date" required />
                 </div>
                 <div class="form-group">
                     <label for="new-list-name">Nome / Nota della lista:</label>
@@ -386,7 +380,7 @@
                 <div class="form-group">
                     <label for="new-list-mode">Come vuoi iniziare la lista?</label>
                     <select id="new-list-mode">
-                        <option value="template">📋 Con tutti i prodotti del file Excel (quantità da inserire)</option>
+                        <option value="template">📋 Riprendi la lista aggiornata (quantità a zero e prezzi aggiornati per fornitore)</option>
                         <option value="copy">📑 Duplica i prodotti e le quantità della lista attuale</option>
                         <option value="empty">✨ Lista vuota (aggiungi tu i singoli prodotti)</option>
                     </select>
