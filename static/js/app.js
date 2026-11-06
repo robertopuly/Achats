@@ -85,6 +85,15 @@ function todayISO() {
     return `${yyyy}-${mm}-${dd}`;
 }
 
+function tomorrowISO() {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+}
+
 function formatDateIT(isoStr) {
     if (!isoStr) return "";
     const parts = String(isoStr).split("-");
@@ -515,7 +524,7 @@ async function refreshListsSummaryOnly() {
 }
 
 function openNewListModal() {
-    document.getElementById("new-list-date").value = todayISO();
+    document.getElementById("new-list-date").value = tomorrowISO();
     document.getElementById("new-list-name").value = "Lista Supermercato";
     document.getElementById("new-list-mode").value = "template";
     openModal("modal-new-list");
@@ -523,7 +532,7 @@ function openNewListModal() {
 
 async function submitNewList(e) {
     e.preventDefault();
-    const list_date = document.getElementById("new-list-date").value || todayISO();
+    const list_date = document.getElementById("new-list-date").value || tomorrowISO();
     const name = document.getElementById("new-list-name").value.trim() || "Lista Supermercato";
     const mode = document.getElementById("new-list-mode").value;
 
