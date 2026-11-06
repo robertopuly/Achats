@@ -1580,6 +1580,137 @@ body.is-smartphone .pc-only {
     color: #fff;
 }
 
+/* ========================================================================== */
+/* LAMPEGGIO QUANTITÀ E POPUP MODIFICHE DEL GIORNO STESSO DELLA SPESA         */
+/* ========================================================================== */
+@keyframes pulseQtyAlert {
+    0%, 100% {
+        background-color: #fef08a;
+        border-color: #dc2626;
+        color: #991b1b;
+        box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.35);
+        transform: scale(1);
+    }
+    50% {
+        background-color: #ef4444;
+        border-color: #991b1b;
+        color: #ffffff;
+        box-shadow: 0 0 10px 3px rgba(239, 68, 68, 0.65);
+        transform: scale(1.06);
+    }
+}
+
+@keyframes pulseBadgeAlert {
+    0%, 100% {
+        background-color: #dc2626;
+        color: #ffffff;
+        opacity: 1;
+    }
+    50% {
+        background-color: #f59e0b;
+        color: #1e293b;
+        opacity: 0.88;
+    }
+}
+
+.product-row.is-same-day-alert:not(.is-purchased) {
+    background: linear-gradient(90deg, #fffbeb 0%, #fef2f2 100%);
+    border-left: 4px solid #dc2626;
+}
+
+.qty-input.qty-blink-alert {
+    animation: pulseQtyAlert 1s infinite ease-in-out;
+    font-weight: 900 !important;
+}
+
+.same-day-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    animation: pulseBadgeAlert 1.1s infinite ease-in-out;
+    flex-shrink: 0;
+}
+
+.same-day-alert-card {
+    border: 2px solid #dc2626;
+    box-shadow: 0 20px 50px rgba(220, 38, 38, 0.28);
+}
+
+.same-day-alert-header {
+    background: linear-gradient(135deg, #dc2626 0%, #ea580c 100%);
+    color: #ffffff;
+}
+
+.same-day-alert-header h2 {
+    color: #ffffff !important;
+}
+
+.same-day-alert-header .modal-close {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.same-day-alert-subtitle {
+    font-size: 0.88rem;
+    color: #334155;
+    margin-bottom: 12px;
+    line-height: 1.4;
+}
+
+.same-day-alert-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+.same-day-alert-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 9px 12px;
+    background: #fffbeb;
+    border: 1.5px solid #f59e0b;
+    border-left: 4px solid #dc2626;
+    border-radius: 8px;
+}
+
+.same-day-alert-item-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.same-day-alert-item-name {
+    font-weight: 800;
+    font-size: 0.95rem;
+    color: #0f172a;
+}
+
+.same-day-alert-item-meta {
+    font-size: 0.76rem;
+    color: #64748b;
+}
+
+.same-day-alert-item-qty {
+    background: #dc2626;
+    color: #ffffff;
+    font-weight: 900;
+    font-size: 0.92rem;
+    padding: 4px 10px;
+    border-radius: 999px;
+    white-space: nowrap;
+    animation: pulseBadgeAlert 1.1s infinite ease-in-out;
+}
+
 /* Riga fornitore modificabile sotto il nome del prodotto */
 .product-sub-line {
     display: flex;

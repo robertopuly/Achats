@@ -480,6 +480,7 @@ async function loadSingleList(listId) {
 
     renderAllFornitoriSelects();
     renderAll();
+    checkAndShowSameDayAlertPopup(state.items);
 }
 
 async function onSelectListChange(listId) {
@@ -916,10 +917,13 @@ function buildProductRow(item, showCatBadge = false) {
 
     const active = isItemActive(item);
     const purchased = item.purchased === 1;
+    const hasQty = String(item.quantity || "").trim() !== "" && String(item.quantity || "").trim() !== "0";
+    const isSameDayBlink = Number(item.same_day_alert) === 1 && !purchased && hasQty;
+
     if (active) row.classList.add("is-active");
     if (purchased) row.classList.add("is-purchased");
+    if (isSameDayBlink) row.classList.add("is-same-day-alert");
 
-    const hasQty = String(item.quantity || "").trim() !== "" && String(item.quantity || "").trim() !== "0";
     const unitPriceNum = Number(item.unit_price || 0);
     const qtyNum = parseFloat(String(item.quantity || "0").replace(",", ".")) || 0;
     const rowTotal = qtyNum > 0 && unitPriceNum > 0 ? (qtyNum * unitPriceNum).toFixed(2) : "";
@@ -949,6 +953,7 @@ function buildProductRow(item, showCatBadge = false) {
         <div class="product-info">
             <div class="product-title-line">
                 ${purchased ? `<span class="purchased-pill">✓<span class="pc-only"> Acquistato</span></span>` : ""}
+                ${isSameDayBlink ? `<span class="same-day-pill" title="Modificato oggi${item.same_day_updated_by ? " da " + escapeHtmlAttr(item.same_day_updated_by) : ""}">🔔<span class="pc-only"> Aggiornato</span></span>` : ""}
                 <span class="product-name">${escapeHtml(item.name)}</span>
                 ${showCatBadge ? `<span class="cat-mini-badge">${escapeHtml(item.category)}</span>` : ""}
             </div>
@@ -980,7 +985,7 @@ function buildProductRow(item, showCatBadge = false) {
                 <input
                     type="text"
                     inputmode="decimal"
-                    class="qty-input ${hasQty ? "has-val" : ""}"
+                    class="qty-input ${hasQty ? "has-val" : ""} ${isSameDayBlink ? "qty-blink-alert" : ""}"
                     value="${escapeHtmlAttr(item.quantity || "")}"
                     placeholder="Q.tà"
                     aria-label="Quantità per ${escapeHtmlAttr(item.name)}"
@@ -1150,6 +1155,8 @@ async function saveCommentDirect(itemId, newComment) {
             body: JSON.stringify({ notes: cleanComment }),
         });
         Object.assign(item, updated);
+        renderAll();
+        scheduleLocalSameDayPopupCheck();
         if (cleanComment) {
             showToast(`💬 Commento salvato per "${item.name}"`, "success");
         }
@@ -1259,7 +1266,10 @@ async function togglePurchasedOrange(itemId) {
 
     item.purchased = newPurchased;
     item.quantity = newQty;
-    if (newPurchased === 1) item.in_list = 1;
+    if (newPurchased === 1) {
+        item.in_list = 1;
+        item.same_day_alert = 0;
+    }
     renderAll();
 
     if (newPurchased === 1) {
@@ -1277,8 +1287,8 @@ async function togglePurchasedOrange(itemId) {
             }),
         });
         Object.assign(item, updated);
-        updateStatsCounters();
-        refreshListsSummaryOnly();
+        renderAll();
+         refreshListsSummaryOnly();
         refreshDbCounterBadge();
     } catch (err) {
         showToast(err.message);
@@ -1321,11 +1331,11 @@ async function saveQuantityDirect(itemId, newQtyValue) {
             body: JSON.stringify({
                 quantity: item.quantity,
                 in_list: nextInList,
-                purchased: keepPurchased,
             }),
         });
         Object.assign(item, updated);
-        updateStatsCounters();
+        renderAll();
+        scheduleLocalSameDayPopupCheck();
         refreshListsSummaryOnly();
         refreshDbCounterBadge();
     } catch (err) {
@@ -1507,6 +1517,7 @@ async function submitProductModal(e) {
         await loadFornitoriList();
         closeModal("modal-product");
         renderAll();
+        scheduleLocalSameDayPopupCheck();
         refreshListsSummaryOnly();
         refreshDbCounterBadge();
     } catch (err) {
@@ -2338,3 +2349,126 @@ function escapeHtml(str) {
 function escapeHtmlAttr(str) {
     return escapeHtml(str).replace(/'/g, "&#39;");
 }
+
+// ============================================================================
+// NOTIFICA POPUP E LAMPEGGIO PER MODIFICHE FATTE IL GIORNO STESSO DELLA SPESA
+// ============================================================================
+const SAME_DAY_ACK_STORAGE_KEY = "achats_same_day_ack_v1";
+let localSameDayPopupTimer = null;
+
+function getAckedSameDayAlerts() {
+    try {
+        const raw = localStorage.getItem(SAME_DAY_ACK_STORAGE_KEY);
+        return raw ? JSON.parse(raw) : {};
+    } catch (_) {
+        return {};
+    }
+}
+
+function saveAckedSameDayAlerts(map) {
+    try {
+        localStorage.setItem(SAME_DAY_ACK_STORAGE_KEY, JSON.stringify(map));
+    } catch (_) {}
+}
+
+function getSameDayAlertKey(item) {
+    return `${item.id}_${item.same_day_updated_at || item.updated_at || ""}`;
+}
+
+function getActiveSameDayAlertItems(items = state.items) {
+    return (items || []).filter((i) => {
+        const hasQty = String(i.quantity || "").trim() !== "" && String(i.quantity || "").trim() !== "0";
+        return Number(i.same_day_alert) === 1 && i.purchased !== 1 && hasQty;
+    });
+}
+
+function playAlertNotificationSound() {
+    try {
+        if (navigator.vibrate) {
+            navigator.vibrate([120, 60, 120]);
+        }
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        osc.frequency.setValueAtTime(1174.66, ctx.currentTime + 0.12);
+        gain.gain.setValueAtTime(0.12, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.35);
+    } catch (_) {}
+}
+
+function scheduleLocalSameDayPopupCheck() {
+    if (localSameDayPopupTimer) {
+        clearTimeout(localSameDayPopupTimer);
+    }
+    localSameDayPopupTimer = setTimeout(() => {
+        checkAndShowSameDayAlertPopup(state.items);
+    }, 1500);
+}
+
+function checkAndShowSameDayAlertPopup(items = state.items) {
+    const activeAlerts = getActiveSameDayAlertItems(items);
+    if (activeAlerts.length === 0) return;
+
+    const acked = getAckedSameDayAlerts();
+    const hasUnacknowledged = activeAlerts.some((item) => !acked[getSameDayAlertKey(item)]);
+    if (!hasUnacknowledged) return;
+
+    const listContainer = document.getElementById("same-day-alert-list");
+    if (!listContainer) return;
+
+    const sortedAlerts = [...activeAlerts].sort((a, b) => {
+        const tA = String(a.same_day_updated_at || a.updated_at || "");
+        const tB = String(b.same_day_updated_at || b.updated_at || "");
+        return tB.localeCompare(tA);
+    });
+
+    listContainer.innerHTML = sortedAlerts
+        .map((item) => {
+            const supp = escapeHtml(item.fornitore || state.currentList?.fornitore || "Aldi");
+            const unit = escapeHtml(item.unit || "Pz");
+            const qty = escapeHtml(item.quantity || "1");
+            const note = item.notes ? ` • 💬 ${escapeHtml(item.notes)}` : "";
+            const by = item.same_day_updated_by ? `da <strong>${escapeHtml(item.same_day_updated_by)}</strong>` : "";
+            const rawTime = String(item.same_day_updated_at || "").slice(11, 16);
+            const timeLabel = rawTime ? ` alle ${escapeHtml(rawTime)}` : "";
+            return `
+                <div class="same-day-alert-item">
+                    <div class="same-day-alert-item-info">
+                        <span class="same-day-alert-item-name">🔔 ${escapeHtml(item.name)}</span>
+                        <span class="same-day-alert-item-meta">🏪 ${supp}${note} ${by ? `(${by}${timeLabel})` : ""}</span>
+                    </div>
+                    <span class="same-day-alert-item-qty">Q.tà: ${qty} ${unit}</span>
+                </div>
+            `;
+        })
+        .join("");
+
+    openModal("modal-same-day-alert");
+    playAlertNotificationSound();
+}
+
+function acknowledgeSameDayAlertModal(scrollToFirst = false) {
+    const activeAlerts = getActiveSameDayAlertItems(state.items);
+    const acked = getAckedSameDayAlerts();
+    for (const item of activeAlerts) {
+        acked[getSameDayAlertKey(item)] = true;
+    }
+    saveAckedSameDayAlerts(acked);
+    closeModal("modal-same-day-alert");
+
+    if (scrollToFirst) {
+        const firstRow = document.querySelector(".product-row.is-same-day-alert");
+        if (firstRow) {
+            firstRow.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+    }
+}
+

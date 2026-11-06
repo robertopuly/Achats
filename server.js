@@ -157,6 +157,9 @@ ensureColumn("shopping_lists", "fornitore", "TEXT DEFAULT 'Aldi'");
 ensureColumn("shopping_list_items", "unit_price", "REAL DEFAULT 0");
 ensureColumn("shopping_list_items", "total_price", "REAL DEFAULT 0");
 ensureColumn("shopping_list_items", "fornitore", "TEXT DEFAULT ''");
+ensureColumn("shopping_list_items", "same_day_alert", "INTEGER DEFAULT 0");
+ensureColumn("shopping_list_items", "same_day_updated_by", "TEXT DEFAULT ''");
+ensureColumn("shopping_list_items", "same_day_updated_at", "TEXT DEFAULT ''");
 ensureColumn("catalog_products", "last_unit_price", "REAL DEFAULT 0");
 ensureColumn("catalog_products", "last_fornitore", "TEXT DEFAULT ''");
 
@@ -535,7 +538,11 @@ function getFullShoppingList(listId) {
     const items = db
         .prepare(
             `SELECT id, list_id, product_id, name, category, unit, quantity, unit_price, total_price,
-                    COALESCE(fornitore, '') AS fornitore, in_list, purchased, notes, updated_at
+                    COALESCE(fornitore, '') AS fornitore, in_list, purchased, notes,
+                    COALESCE(same_day_alert, 0) AS same_day_alert,
+                    COALESCE(same_day_updated_by, '') AS same_day_updated_by,
+                    COALESCE(same_day_updated_at, '') AS same_day_updated_at,
+                    updated_at
              FROM shopping_list_items
              WHERE list_id = ?
              ORDER BY name COLLATE NOCASE ASC`
@@ -1166,13 +1173,34 @@ async function handleRequest(req, res) {
             }
 
             const in_list = (quantity !== "" && quantity !== "0") || data.in_list ? 1 : 0;
+            const isSameDayOfShopping = todayIso() >= String(parentList?.list_date || todayIso());
+            const same_day_alert = isSameDayOfShopping && in_list === 1 ? 1 : 0;
+            const same_day_updated_by = same_day_alert ? (currentUser.display_name || currentUser.username || "Collega") : "";
+            const same_day_updated_at = same_day_alert ? ts : "";
+
             const iInfo = db
                 .prepare(
                     `INSERT INTO shopping_list_items
-                     (list_id, product_id, name, category, unit, quantity, unit_price, total_price, fornitore, in_list, purchased, notes, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+                     (list_id, product_id, name, category, unit, quantity, unit_price, total_price, fornitore, in_list, purchased, notes, same_day_alert, same_day_updated_by, same_day_updated_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`
                 )
-                .run(listId, productId, name, category, unit, quantity, unit_price, total_price, fornitore, in_list, notes, ts);
+                .run(
+                    listId,
+                    productId,
+                    name,
+                    category,
+                    unit,
+                    quantity,
+                    unit_price,
+                    total_price,
+                    fornitore,
+                    in_list,
+                    notes,
+                    same_day_alert,
+                    same_day_updated_by,
+                    same_day_updated_at,
+                    ts
+                );
 
             touchList(listId);
             const item = db.prepare("SELECT * FROM shopping_list_items WHERE id = ?").get(Number(iInfo.lastInsertRowid));
@@ -1217,13 +1245,18 @@ async function handleRequest(req, res) {
                     db.prepare(
                         "UPDATE acquisti SET data_acquisto = ?, anno = ?, mese = ?, giorno = ?, updated_at = ? WHERE list_id = ?"
                     ).run(data_acquisto, anno, mese, giorno, ts, listId);
+                    if (list_date > todayIso()) {
+                        db.prepare(
+                            "UPDATE shopping_list_items SET same_day_alert = 0, same_day_updated_by = '', same_day_updated_at = '' WHERE list_id = ?"
+                        ).run(listId);
+                    }
                 }
 
                 if (data.action === "clear_purchased") {
                     db.prepare("UPDATE shopping_list_items SET purchased = 0, updated_at = ? WHERE list_id = ?").run(ts, listId);
                 } else if (data.action === "clear_quantities") {
                     db.prepare(
-                        "UPDATE shopping_list_items SET quantity = '', total_price = 0, notes = '', in_list = 0, purchased = 0, updated_at = ? WHERE list_id = ?"
+                        "UPDATE shopping_list_items SET quantity = '', total_price = 0, notes = '', in_list = 0, purchased = 0, same_day_alert = 0, same_day_updated_by = '', same_day_updated_at = '', updated_at = ? WHERE list_id = ?"
                     ).run(ts, listId);
                 }
                 return sendJson(res, 200, getFullShoppingList(listId));
@@ -1309,15 +1342,64 @@ async function handleRequest(req, res) {
                 }
 
                 const ts = nowIso();
+                const isSameDayOfShopping = todayIso() >= String(parentList?.list_date || todayIso());
+                const qtyChanged = "quantity" in data && String(quantity) !== String(item.quantity || "");
+                const notesChanged = "notes" in data && String(notes) !== String(item.notes || "");
+                const hasActiveQty = quantity !== "" && quantity !== "0";
+
+                let same_day_alert = Number(item.same_day_alert || 0);
+                let same_day_updated_by = String(item.same_day_updated_by || "");
+                let same_day_updated_at = String(item.same_day_updated_at || "");
+
+                if ("purchased" in data && data.purchased) {
+                    // Quando il prodotto viene segnato come Acquistato, smette di lampeggiare
+                    same_day_alert = 0;
+                } else if (!hasActiveQty && in_list === 0) {
+                    // Se la quantità viene azzerata/rimossa, rimuovi l'avviso
+                    same_day_alert = 0;
+                    same_day_updated_by = "";
+                    same_day_updated_at = "";
+                } else if (
+                    isSameDayOfShopping &&
+                    hasActiveQty &&
+                    (qtyChanged || notesChanged || ("in_list" in data && data.in_list && !item.in_list))
+                ) {
+                    // Modifica fatta il giorno stesso della spesa: attiva lampeggio e notifica popup
+                    same_day_alert = 1;
+                    same_day_updated_by = currentUser.display_name || currentUser.username || "Collega";
+                    same_day_updated_at = ts;
+                    if (qtyChanged && purchased === 1 && !("purchased" in data)) {
+                        purchased = 0;
+                    }
+                }
+
                 db.prepare(
                     "INSERT OR IGNORE INTO categories (name, icon, color, sort_order, column_group) VALUES (?, '📦', '#0ea5e9', 10, 1)"
                 ).run(category);
 
                 db.prepare(
                     `UPDATE shopping_list_items
-                     SET name = ?, category = ?, unit = ?, quantity = ?, unit_price = ?, total_price = ?, fornitore = ?, in_list = ?, purchased = ?, notes = ?, updated_at = ?
+                     SET name = ?, category = ?, unit = ?, quantity = ?, unit_price = ?, total_price = ?, fornitore = ?,
+                         in_list = ?, purchased = ?, notes = ?,
+                         same_day_alert = ?, same_day_updated_by = ?, same_day_updated_at = ?, updated_at = ?
                      WHERE id = ?`
-                ).run(name, category, unit, quantity, unit_price, total_price, fornitore, in_list, purchased, notes, ts, itemId);
+                ).run(
+                    name,
+                    category,
+                    unit,
+                    quantity,
+                    unit_price,
+                    total_price,
+                    fornitore,
+                    in_list,
+                    purchased,
+                    notes,
+                    same_day_alert,
+                    same_day_updated_by,
+                    same_day_updated_at,
+                    ts,
+                    itemId
+                );
 
                 if (item.product_id && ("name" in data || "category" in data || "unit" in data || "unit_price" in data || "fornitore" in data)) {
                     db.prepare(

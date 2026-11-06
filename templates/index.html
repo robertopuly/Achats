@@ -703,6 +703,30 @@
         </div>
     </div>
 
+    <!-- =================================================================== -->
+    <!-- MODALE POPUP: NOTIFICA MODIFICHE DEL GIORNO STESSO DELLA SPESA      -->
+    <!-- =================================================================== -->
+    <div id="modal-same-day-alert" class="modal-backdrop hidden" onclick="acknowledgeSameDayAlertModal()">
+        <div class="modal-card same-day-alert-card" onclick="event.stopPropagation()">
+            <div class="modal-header same-day-alert-header">
+                <h2>🔔 Lista Aggiornata Oggi!</h2>
+                <button type="button" class="modal-close" onclick="acknowledgeSameDayAlertModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <p class="same-day-alert-subtitle">
+                    Sono state aggiunte o modificate delle quantità nella lista della spesa del giorno.
+                    Le quantità modificate <strong>lampeggeranno</strong> fino a quando non le segnerai come <strong>Acquistato</strong>:
+                </p>
+                <div id="same-day-alert-list" class="same-day-alert-list"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" onclick="acknowledgeSameDayAlertModal(true)">
+                    👀 Vai ai prodotti aggiornati
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/js/app.js"></script>
 </body>
 </html>
