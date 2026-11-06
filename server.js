@@ -522,6 +522,14 @@ async function handleRequest(req, res) {
         }
 
         if (pathname === "/api/auth/register" && method === "POST") {
+            const totalUsers = db.prepare("SELECT COUNT(*) AS c FROM users").get().c;
+            const authUser = getAuthUser(req);
+            if (totalUsers > 0 && !authUser) {
+                return sendJson(res, 403, {
+                    error: "La creazione di nuovi account è riservata all'amministratore dal PC (pulsante Utenti).",
+                });
+            }
+
             const data = await readJsonBody(req);
             const username = String(data.username || "").trim();
             const password = String(data.password || "");
@@ -592,6 +600,96 @@ async function handleRequest(req, res) {
         const currentUser = getAuthUser(req);
         if (!currentUser) {
             return sendJson(res, 401, { error: "Autenticazione richiesta", authenticated: false });
+        }
+
+        // =====================================================================
+        // 2B. GESTIONE ACCOUNT UTENTI (Creazione colleghi da PC, cambio password, eliminazione)
+        // =====================================================================
+        if (pathname === "/api/users" && method === "GET") {
+            const list = db
+                .prepare("SELECT id, username, display_name, created_at FROM users ORDER BY id ASC")
+                .all();
+            return sendJson(res, 200, list);
+        }
+
+        if (pathname === "/api/users" && method === "POST") {
+            const data = await readJsonBody(req);
+            const username = String(data.username || "").trim();
+            const password = String(data.password || "");
+            const display_name = String(data.display_name || "").trim() || username;
+
+            if (username.length < 2) {
+                return sendJson(res, 400, { error: "Il nome utente deve contenere almeno 2 caratteri." });
+            }
+            if (password.length < 3) {
+                return sendJson(res, 400, { error: "La password deve contenere almeno 3 caratteri." });
+            }
+
+            const existing = db.prepare("SELECT id FROM users WHERE LOWER(username) = LOWER(?)").get(username);
+            if (existing) {
+                return sendJson(res, 409, { error: `L'utente "${username}" esiste già.` });
+            }
+
+            const pwHash = hashPassword(password);
+            const ts = nowIso();
+            db.prepare("INSERT INTO users (username, display_name, password_hash, created_at) VALUES (?, ?, ?, ?)").run(
+                username,
+                display_name,
+                pwHash,
+                ts
+            );
+
+            const list = db
+                .prepare("SELECT id, username, display_name, created_at FROM users ORDER BY id ASC")
+                .all();
+            return sendJson(res, 200, list);
+        }
+
+        const userMatch = pathname.match(/^\/api\/users\/(\d+)$/);
+        if (userMatch) {
+            const targetId = Number(userMatch[1]);
+            const targetUser = db.prepare("SELECT * FROM users WHERE id = ?").get(targetId);
+            if (!targetUser) return sendJson(res, 404, { error: "Utente non trovato." });
+
+            if (method === "PUT") {
+                const data = await readJsonBody(req);
+                const newDisplay =
+                    data.display_name !== undefined
+                        ? String(data.display_name || "").trim() || targetUser.username
+                        : targetUser.display_name;
+                const newPass = String(data.password || "");
+
+                if (newPass) {
+                    if (newPass.length < 3) {
+                        return sendJson(res, 400, { error: "La nuova password deve avere almeno 3 caratteri." });
+                    }
+                    const pwHash = hashPassword(newPass);
+                    db.prepare("UPDATE users SET display_name = ?, password_hash = ? WHERE id = ?").run(
+                        newDisplay,
+                        pwHash,
+                        targetId
+                    );
+                } else {
+                    db.prepare("UPDATE users SET display_name = ? WHERE id = ?").run(newDisplay, targetId);
+                }
+
+                const list = db
+                    .prepare("SELECT id, username, display_name, created_at FROM users ORDER BY id ASC")
+                    .all();
+                return sendJson(res, 200, list);
+            }
+
+            if (method === "DELETE") {
+                if (targetId === currentUser.id) {
+                    return sendJson(res, 400, { error: "Non puoi eliminare il tuo stesso account attualmente in uso." });
+                }
+                db.prepare("DELETE FROM user_sessions WHERE user_id = ?").run(targetId);
+                db.prepare("DELETE FROM users WHERE id = ?").run(targetId);
+                const list = db
+                    .prepare("SELECT id, username, display_name, created_at FROM users ORDER BY id ASC")
+                    .all();
+                return sendJson(res, 200, list);
+            }
         }
 
         // =====================================================================

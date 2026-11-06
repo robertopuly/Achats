@@ -2236,6 +2236,101 @@ function copyLanUrl() {
     showToast("Indirizzo copiato negli appunti!", "success");
 }
 
+// ============================================================================
+// GESTIONE ACCOUNT UTENTI (SOLO DA PC)
+// ============================================================================
+async function openUsersModal() {
+    document.getElementById("new-user-username").value = "";
+    document.getElementById("new-user-display").value = "";
+    document.getElementById("new-user-password").value = "";
+    openModal("modal-users");
+    try {
+        const users = await apiFetch("/api/users");
+        renderUsersManageModalList(users);
+    } catch (err) {
+        showToast(err.message);
+    }
+}
+
+function renderUsersManageModalList(users = []) {
+    const container = document.getElementById("users-manage-list");
+    if (!container) return;
+    container.innerHTML = "";
+
+    for (const u of users) {
+        const isCurrent = state.user && state.user.id === u.id;
+        const row = document.createElement("div");
+        row.className = "fornitore-manage-row";
+        row.innerHTML = `
+            <div style="flex:1; min-width:0;">
+                <strong style="font-size:0.9rem; color:#0f172a;">👤 ${escapeHtml(u.username)}</strong>
+                <span style="font-size:0.8rem; color:#64748b; margin-left:4px;">(${escapeHtml(u.display_name)})</span>
+                ${isCurrent ? `<span class="cat-mini-badge" style="margin-left:4px;">Tu</span>` : ""}
+            </div>
+            <input type="text" placeholder="Nuova password..." style="max-width:135px; padding:5px 8px; font-size:0.82rem;" />
+            <button type="button" class="btn btn-primary btn-sm" data-act="pw">Cambia PW</button>
+            ${!isCurrent ? `<button type="button" class="btn btn-danger btn-sm" data-act="del" title="Elimina account">🗑</button>` : ""}
+        `;
+        const pwInput = row.querySelector("input");
+        row.querySelector('[data-act="pw"]').addEventListener("click", async () => {
+            const newPassword = pwInput.value.trim();
+            if (newPassword.length < 3) {
+                showToast("Inserisci una nuova password di almeno 3 caratteri.");
+                return;
+            }
+            try {
+                const updated = await apiFetch(`/api/users/${u.id}`, {
+                    method: "PUT",
+                    body: JSON.stringify({ password: newPassword }),
+                });
+                pwInput.value = "";
+                renderUsersManageModalList(updated);
+                showToast(`Password aggiornata per "${u.username}"!`, "success");
+            } catch (err) {
+                showToast(err.message);
+            }
+        });
+
+        const delBtn = row.querySelector('[data-act="del"]');
+        if (delBtn) {
+            delBtn.addEventListener("click", async () => {
+                if (!confirm(`Vuoi eliminare l'account "${u.username}"?`)) return;
+                try {
+                    const updated = await apiFetch(`/api/users/${u.id}`, { method: "DELETE" });
+                    renderUsersManageModalList(updated);
+                    showToast(`Account "${u.username}" eliminato.`);
+                } catch (err) {
+                    showToast(err.message);
+                }
+            });
+        }
+
+        container.appendChild(row);
+    }
+}
+
+async function createNewUserAccount(e) {
+    e.preventDefault();
+    const username = document.getElementById("new-user-username").value.trim();
+    const display_name = document.getElementById("new-user-display").value.trim() || username;
+    const password = document.getElementById("new-user-password").value;
+
+    if (!username || !password) return;
+    try {
+        const updated = await apiFetch("/api/users", {
+            method: "POST",
+            body: JSON.stringify({ username, display_name, password }),
+        });
+        document.getElementById("new-user-username").value = "";
+        document.getElementById("new-user-display").value = "";
+        document.getElementById("new-user-password").value = "";
+        renderUsersManageModalList(updated);
+        showToast(`Account "${username}" creato! Ora puoi comunicare nome utente e password al collega.`, "success");
+    } catch (err) {
+        showToast(err.message);
+    }
+}
+
 function escapeHtml(str) {
     return String(str ?? "")
         .replace(/&/g, "&amp;")

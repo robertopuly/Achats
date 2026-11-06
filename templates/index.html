@@ -22,7 +22,7 @@
                 <p>Gestisci la spesa e il database acquisti da PC e Smartphone</p>
             </div>
 
-            <div class="auth-tabs">
+            <div class="auth-tabs hidden" id="auth-tabs-bar">
                 <button type="button" id="tab-login" class="auth-tab active" onclick="switchAuthTab('login')">
                     Accedi
                 </button>
@@ -99,6 +99,9 @@
                 </div>
 
                 <div class="header-actions">
+                    <button type="button" class="btn btn-ghost btn-sm pc-only" onclick="openUsersModal()" title="Crea e gestisci gli account utenti (es. Cucina)">
+                        👥 <span class="hide-xs">Utenti</span>
+                    </button>
                     <button type="button" class="btn btn-ghost btn-sm" onclick="openLanModal()" title="Connetti Smartphone">
                         📱 <span class="hide-xs">Smartphone</span>
                     </button>
@@ -663,6 +666,45 @@
                 <p class="lan-note">
                     Ogni modifica alle quantità, ai prezzi, ai fornitori o ai prodotti evidenziati in arancione viene sincronizzata automaticamente tra PC e Smartphone!
                 </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- MODALE: GESTIONE ACCOUNT UTENTI (SOLO DA PC)                        -->
+    <!-- =================================================================== -->
+    <div id="modal-users" class="modal-backdrop hidden" onclick="closeModalOnBackdrop(event, 'modal-users')">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2>👥 Gestione Account Utenti</h2>
+                <button type="button" class="modal-close" onclick="closeModal('modal-users')">✕</button>
+            </div>
+            <div class="modal-body">
+                <p style="font-size:0.86rem; color:#475569; margin-bottom:8px;">
+                    Crea qui l'account per i colleghi (es. <strong>cucina</strong>) e comunica loro il Nome Utente e la Password:
+                </p>
+
+                <form onsubmit="createNewUserAccount(event)" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px; margin-bottom:14px;">
+                    <div class="form-row-2" style="margin-bottom:8px;">
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label for="new-user-username">Nome utente (login):</label>
+                            <input type="text" id="new-user-username" required minlength="2" placeholder="Es. cucina" />
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label for="new-user-display">Nome visualizzato:</label>
+                            <input type="text" id="new-user-display" placeholder="Es. Cucina" />
+                        </div>
+                    </div>
+                    <div class="inline-input-btn">
+                        <input type="text" id="new-user-password" required minlength="3" placeholder="Password (min. 3 caratteri)" />
+                        <button type="submit" class="btn btn-primary">＋ Crea Account</button>
+                    </div>
+                </form>
+
+                <label style="font-size:0.82rem; font-weight:700; color:#334155; display:block; margin-bottom:6px;">
+                    Account attivi:
+                </label>
+                <div id="users-manage-list" class="fornitori-manage-list"></div>
             </div>
         </div>
     </div>
