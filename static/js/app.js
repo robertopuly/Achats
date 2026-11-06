@@ -918,7 +918,7 @@ function buildProductRow(item, showCatBadge = false) {
     const active = isItemActive(item);
     const purchased = item.purchased === 1;
     const hasQty = String(item.quantity || "").trim() !== "" && String(item.quantity || "").trim() !== "0";
-    const isSameDayBlink = Number(item.same_day_alert) === 1 && !purchased && hasQty;
+    const isSameDayBlink = isSameDayAlertForOtherAccount(item);
 
     if (active) row.classList.add("is-active");
     if (purchased) row.classList.add("is-purchased");
@@ -1156,7 +1156,6 @@ async function saveCommentDirect(itemId, newComment) {
         });
         Object.assign(item, updated);
         renderAll();
-        scheduleLocalSameDayPopupCheck();
         if (cleanComment) {
             showToast(`💬 Commento salvato per "${item.name}"`, "success");
         }
@@ -1317,7 +1316,8 @@ async function saveQuantityDirect(itemId, newQtyValue) {
 
     const cleanQty = String(newQtyValue || "").trim();
     const isZeroOrEmpty = cleanQty === "" || cleanQty === "0";
-    const keepPurchased = isZeroOrEmpty ? 0 : item.purchased;
+    const qtyChanged = (isZeroOrEmpty ? "" : cleanQty) !== String(item.quantity || "").trim();
+    const keepPurchased = isZeroOrEmpty || qtyChanged ? 0 : item.purchased;
     const nextInList = isZeroOrEmpty ? 0 : 1;
 
     item.quantity = isZeroOrEmpty ? "" : cleanQty;
@@ -1335,7 +1335,6 @@ async function saveQuantityDirect(itemId, newQtyValue) {
         });
         Object.assign(item, updated);
         renderAll();
-        scheduleLocalSameDayPopupCheck();
         refreshListsSummaryOnly();
         refreshDbCounterBadge();
     } catch (err) {
@@ -1517,7 +1516,6 @@ async function submitProductModal(e) {
         await loadFornitoriList();
         closeModal("modal-product");
         renderAll();
-        scheduleLocalSameDayPopupCheck();
         refreshListsSummaryOnly();
         refreshDbCounterBadge();
     } catch (err) {
@@ -2375,11 +2373,25 @@ function getSameDayAlertKey(item) {
     return `${item.id}_${item.same_day_updated_at || item.updated_at || ""}`;
 }
 
+function isSameDayAlertForOtherAccount(item) {
+    if (!item) return false;
+    const hasQty = String(item.quantity || "").trim() !== "" && String(item.quantity || "").trim() !== "0";
+    if (Number(item.same_day_alert) !== 1 || item.purchased === 1 || !hasQty) {
+        return false;
+    }
+    // L'avviso e il lampeggio arrivano a tutti gli altri account (smartphone o PC) e NON a chi l'ha inserito
+    if (
+        state.user &&
+        Number(item.same_day_updated_by_id) > 0 &&
+        Number(item.same_day_updated_by_id) === Number(state.user.id)
+    ) {
+        return false;
+    }
+    return true;
+}
+
 function getActiveSameDayAlertItems(items = state.items) {
-    return (items || []).filter((i) => {
-        const hasQty = String(i.quantity || "").trim() !== "" && String(i.quantity || "").trim() !== "0";
-        return Number(i.same_day_alert) === 1 && i.purchased !== 1 && hasQty;
-    });
+    return (items || []).filter((i) => isSameDayAlertForOtherAccount(i));
 }
 
 function playAlertNotificationSound() {

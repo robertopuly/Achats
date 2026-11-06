@@ -159,6 +159,7 @@ ensureColumn("shopping_list_items", "total_price", "REAL DEFAULT 0");
 ensureColumn("shopping_list_items", "fornitore", "TEXT DEFAULT ''");
 ensureColumn("shopping_list_items", "same_day_alert", "INTEGER DEFAULT 0");
 ensureColumn("shopping_list_items", "same_day_updated_by", "TEXT DEFAULT ''");
+ensureColumn("shopping_list_items", "same_day_updated_by_id", "INTEGER DEFAULT 0");
 ensureColumn("shopping_list_items", "same_day_updated_at", "TEXT DEFAULT ''");
 ensureColumn("catalog_products", "last_unit_price", "REAL DEFAULT 0");
 ensureColumn("catalog_products", "last_fornitore", "TEXT DEFAULT ''");
@@ -351,13 +352,23 @@ function syncListItemToAcquisti(item, parentList) {
     const unitPriceNum = roundMoney(parseNumber(item.unit_price, 0));
     const totalPriceNum = roundMoney(qtyNum * unitPriceNum);
 
-    const existing = db.prepare("SELECT id FROM acquisti WHERE list_item_id = ?").get(item.id);
-    if (item.purchased === 1 || (existing && item.in_list === 1)) {
+    const existing = db
+        .prepare(
+            "SELECT id FROM acquisti WHERE list_item_id = ? OR (list_id = ? AND LOWER(descrizione_prodotto) = LOWER(?)) ORDER BY id DESC LIMIT 1"
+        )
+        .get(item.id, item.list_id, item.name);
+
+    if (item.purchased === 1) {
         if (existing) {
+            // Evita qualsiasi doppione per lo stesso prodotto nella stessa lista
+            db.prepare(
+                "DELETE FROM acquisti WHERE (list_item_id = ? OR (list_id = ? AND LOWER(descrizione_prodotto) = LOWER(?))) AND id != ?"
+            ).run(item.id, item.list_id, item.name, existing.id);
+
             db.prepare(
                 `UPDATE acquisti
                  SET descrizione_prodotto = ?, fornitore = ?, categoria = ?, unita = ?, prezzo_unitario = ?, quantita = ?, prezzo_totale = ?,
-                     data_acquisto = ?, anno = ?, mese = ?, giorno = ?, note = ?, updated_at = ?
+                     list_id = ?, list_item_id = ?, data_acquisto = ?, anno = ?, mese = ?, giorno = ?, note = ?, updated_at = ?
                  WHERE id = ?`
             ).run(
                 item.name,
@@ -367,6 +378,8 @@ function syncListItemToAcquisti(item, parentList) {
                 unitPriceNum,
                 qtyNum,
                 totalPriceNum,
+                item.list_id,
+                item.id,
                 data_acquisto,
                 anno,
                 mese,
@@ -401,7 +414,9 @@ function syncListItemToAcquisti(item, parentList) {
             );
         }
     } else if (existing) {
-        db.prepare("DELETE FROM acquisti WHERE list_item_id = ?").run(item.id);
+        db.prepare(
+            "DELETE FROM acquisti WHERE list_item_id = ? OR (list_id = ? AND LOWER(descrizione_prodotto) = LOWER(?))"
+        ).run(item.id, item.list_id, item.name);
     }
 }
 
@@ -541,6 +556,7 @@ function getFullShoppingList(listId) {
                     COALESCE(fornitore, '') AS fornitore, in_list, purchased, notes,
                     COALESCE(same_day_alert, 0) AS same_day_alert,
                     COALESCE(same_day_updated_by, '') AS same_day_updated_by,
+                    COALESCE(same_day_updated_by_id, 0) AS same_day_updated_by_id,
                     COALESCE(same_day_updated_at, '') AS same_day_updated_at,
                     updated_at
              FROM shopping_list_items
@@ -1176,13 +1192,14 @@ async function handleRequest(req, res) {
             const isSameDayOfShopping = todayIso() >= String(parentList?.list_date || todayIso());
             const same_day_alert = isSameDayOfShopping && in_list === 1 ? 1 : 0;
             const same_day_updated_by = same_day_alert ? (currentUser.display_name || currentUser.username || "Collega") : "";
+            const same_day_updated_by_id = same_day_alert ? Number(currentUser.id || 0) : 0;
             const same_day_updated_at = same_day_alert ? ts : "";
 
             const iInfo = db
                 .prepare(
                     `INSERT INTO shopping_list_items
-                     (list_id, product_id, name, category, unit, quantity, unit_price, total_price, fornitore, in_list, purchased, notes, same_day_alert, same_day_updated_by, same_day_updated_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`
+                     (list_id, product_id, name, category, unit, quantity, unit_price, total_price, fornitore, in_list, purchased, notes, same_day_alert, same_day_updated_by, same_day_updated_by_id, same_day_updated_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`
                 )
                 .run(
                     listId,
@@ -1198,6 +1215,7 @@ async function handleRequest(req, res) {
                     notes,
                     same_day_alert,
                     same_day_updated_by,
+                    same_day_updated_by_id,
                     same_day_updated_at,
                     ts
                 );
@@ -1349,7 +1367,14 @@ async function handleRequest(req, res) {
 
                 let same_day_alert = Number(item.same_day_alert || 0);
                 let same_day_updated_by = String(item.same_day_updated_by || "");
+                let same_day_updated_by_id = Number(item.same_day_updated_by_id || 0);
                 let same_day_updated_at = String(item.same_day_updated_at || "");
+
+                // Se cambia la quantità di un prodotto che era già stato segnato come Acquistato (arancione),
+                // toglie lo stato Acquistato così va tenuto premuto di nuovo > 1 secondo per confermare il nuovo acquisto
+                if (qtyChanged && item.purchased === 1 && !("purchased" in data)) {
+                    purchased = 0;
+                }
 
                 if ("purchased" in data && data.purchased) {
                     // Quando il prodotto viene segnato come Acquistato, smette di lampeggiare
@@ -1358,19 +1383,18 @@ async function handleRequest(req, res) {
                     // Se la quantità viene azzerata/rimossa, rimuovi l'avviso
                     same_day_alert = 0;
                     same_day_updated_by = "";
+                    same_day_updated_by_id = 0;
                     same_day_updated_at = "";
                 } else if (
                     isSameDayOfShopping &&
                     hasActiveQty &&
                     (qtyChanged || notesChanged || ("in_list" in data && data.in_list && !item.in_list))
                 ) {
-                    // Modifica fatta il giorno stesso della spesa: attiva lampeggio e notifica popup
+                    // Modifica fatta il giorno stesso della spesa: attiva lampeggio e notifica popup per gli altri account
                     same_day_alert = 1;
                     same_day_updated_by = currentUser.display_name || currentUser.username || "Collega";
+                    same_day_updated_by_id = Number(currentUser.id || 0);
                     same_day_updated_at = ts;
-                    if (qtyChanged && purchased === 1 && !("purchased" in data)) {
-                        purchased = 0;
-                    }
                 }
 
                 db.prepare(
@@ -1381,7 +1405,7 @@ async function handleRequest(req, res) {
                     `UPDATE shopping_list_items
                      SET name = ?, category = ?, unit = ?, quantity = ?, unit_price = ?, total_price = ?, fornitore = ?,
                          in_list = ?, purchased = ?, notes = ?,
-                         same_day_alert = ?, same_day_updated_by = ?, same_day_updated_at = ?, updated_at = ?
+                         same_day_alert = ?, same_day_updated_by = ?, same_day_updated_by_id = ?, same_day_updated_at = ?, updated_at = ?
                      WHERE id = ?`
                 ).run(
                     name,
@@ -1396,6 +1420,7 @@ async function handleRequest(req, res) {
                     notes,
                     same_day_alert,
                     same_day_updated_by,
+                    same_day_updated_by_id,
                     same_day_updated_at,
                     ts,
                     itemId
@@ -1567,12 +1592,19 @@ async function handleRequest(req, res) {
                 const totalPriceNum = roundMoney(qtyNum * unitPriceNum);
                 const itemFornitore = ensureSupplierExists(item.fornitore || defaultFornitore);
 
-                const existing = db.prepare("SELECT id FROM acquisti WHERE list_item_id = ?").get(item.id);
+                const existing = db
+                    .prepare(
+                        "SELECT id FROM acquisti WHERE list_item_id = ? OR (list_id = ? AND LOWER(descrizione_prodotto) = LOWER(?)) ORDER BY id DESC LIMIT 1"
+                    )
+                    .get(item.id, listId, item.name);
                 if (existing) {
+                    db.prepare(
+                        "DELETE FROM acquisti WHERE (list_item_id = ? OR (list_id = ? AND LOWER(descrizione_prodotto) = LOWER(?))) AND id != ?"
+                    ).run(item.id, listId, item.name, existing.id);
                     db.prepare(
                         `UPDATE acquisti
                          SET descrizione_prodotto = ?, fornitore = ?, categoria = ?, unita = ?, prezzo_unitario = ?, quantita = ?, prezzo_totale = ?,
-                             data_acquisto = ?, anno = ?, mese = ?, giorno = ?, note = ?, updated_at = ?
+                             list_id = ?, list_item_id = ?, data_acquisto = ?, anno = ?, mese = ?, giorno = ?, note = ?, updated_at = ?
                          WHERE id = ?`
                     ).run(
                         item.name,
@@ -1582,6 +1614,8 @@ async function handleRequest(req, res) {
                         unitPriceNum,
                         qtyNum,
                         totalPriceNum,
+                        listId,
+                        item.id,
                         data_acquisto,
                         anno,
                         mese,
