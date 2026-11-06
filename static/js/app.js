@@ -1164,7 +1164,45 @@ async function saveCommentDirect(itemId, newComment) {
     }
 }
 
+let activeCancelLongPressFn = null;
+let multiTouchGuardBound = false;
+
+function bindMultiTouchPinchGuard() {
+    if (multiTouchGuardBound) return;
+    multiTouchGuardBound = true;
+
+    const cancelActive = () => {
+        if (typeof activeCancelLongPressFn === "function") {
+            activeCancelLongPressFn();
+        }
+    };
+
+    document.addEventListener(
+        "touchstart",
+        (e) => {
+            if (e.touches && e.touches.length > 1) {
+                cancelActive();
+            }
+        },
+        { passive: true }
+    );
+    document.addEventListener(
+        "touchmove",
+        (e) => {
+            if (e.touches && e.touches.length > 1) {
+                cancelActive();
+            }
+        },
+        { passive: true }
+    );
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener("resize", cancelActive);
+        window.visualViewport.addEventListener("scroll", cancelActive);
+    }
+}
+
 function attachLongPressHandler(rowEl, itemId) {
+    bindMultiTouchPinchGuard();
     let pressTimer = null;
     let startX = 0;
     let startY = 0;
@@ -1177,15 +1215,28 @@ function attachLongPressHandler(rowEl, itemId) {
         );
     };
 
+    const cancelPress = () => {
+        if (pressTimer) {
+            clearTimeout(pressTimer);
+            pressTimer = null;
+        }
+        rowEl.classList.remove("pressing");
+        if (activeCancelLongPressFn === cancelPress) {
+            activeCancelLongPressFn = null;
+        }
+    };
+
     const startPress = (clientX, clientY, target) => {
         if (isInteractiveTarget(target)) return;
         startX = clientX;
         startY = clientY;
         rowEl.classList.add("pressing");
+        activeCancelLongPressFn = cancelPress;
 
         clearTimeout(pressTimer);
         pressTimer = setTimeout(() => {
             rowEl.classList.remove("pressing");
+            activeCancelLongPressFn = null;
             if (navigator.vibrate) {
                 try {
                     navigator.vibrate(65);
@@ -1193,14 +1244,6 @@ function attachLongPressHandler(rowEl, itemId) {
             }
             togglePurchasedOrange(itemId);
         }, LONG_PRESS_MS);
-    };
-
-    const cancelPress = () => {
-        if (pressTimer) {
-            clearTimeout(pressTimer);
-            pressTimer = null;
-        }
-        rowEl.classList.remove("pressing");
     };
 
     const movePress = (clientX, clientY) => {
@@ -1228,7 +1271,10 @@ function attachLongPressHandler(rowEl, itemId) {
     rowEl.addEventListener(
         "touchmove",
         (e) => {
-            if (e.touches.length !== 1) return;
+            if (e.touches.length !== 1) {
+                cancelPress();
+                return;
+            }
             const t = e.touches[0];
             movePress(t.clientX, t.clientY);
         },
