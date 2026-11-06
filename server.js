@@ -281,12 +281,12 @@ function getSupplierPrice(productName, fornitore) {
         }
         const listCount = db.prepare("SELECT COUNT(*) AS c FROM shopping_lists").get().c;
         if (listCount === 0) {
-            const today = new Date().toISOString().slice(0, 10);
+            const defaultDate = "2026-11-07";
             const info = db
                 .prepare(
                     "INSERT INTO shopping_lists (name, list_date, fornitore, created_by, created_at, updated_at) VALUES (?, ?, 'Aldi', NULL, ?, ?)"
                 )
-                .run("Lista Supermercato", today, ts, ts);
+                .run("Lista Supermercato", defaultDate, ts, ts);
             const listId = Number(info.lastInsertRowid);
             const prods = db.prepare("SELECT id, name, category, default_unit FROM catalog_products").all();
             const insItem = db.prepare(
@@ -298,6 +298,101 @@ function getSupplierPrice(productName, fornitore) {
             }
         }
     } catch (_) {}
+})();
+
+// Pulizia liste e acquisti datati fino al 6 novembre 2026 (mantenendo intatto il catalogo prodotti e la lista del 7 novembre)
+(function cleanupListsUpTo20261106() {
+    try {
+        const cutoffDate = "2026-11-06";
+        const oldListsCount = db.prepare("SELECT COUNT(*) AS c FROM shopping_lists WHERE list_date <= ?").get(cutoffDate).c;
+        const oldAcqCount = db.prepare("SELECT COUNT(*) AS c FROM acquisti WHERE data_acquisto <= ?").get(cutoffDate).c;
+        if (oldListsCount === 0 && oldAcqCount === 0) return;
+
+        const ts = new Date().toISOString().slice(0, 19);
+
+        // 1. Salva tutti i nomi dei prodotti presenti nelle liste dentro catalog_products così nessun prodotto va perso
+        const allItems = db
+            .prepare(
+                "SELECT name, category, unit, COALESCE(unit_price, 0) AS unit_price, COALESCE(NULLIF(fornitore, ''), 'Aldi') AS fornitore FROM shopping_list_items ORDER BY id ASC"
+            )
+            .all();
+        for (const it of allItems) {
+            const cleanName = String(it.name || "").trim();
+            if (!cleanName) continue;
+            const cleanCat = String(it.category || "ALIMENTARI").trim().toUpperCase();
+            const cleanUnit = String(it.unit || "").trim();
+            const cleanForn = String(it.fornitore || "Aldi").trim() || "Aldi";
+            const uPrice = roundMoney(parseNumber(it.unit_price, 0));
+
+            if (uPrice > 0) {
+                saveSupplierPrice(cleanName, cleanForn, uPrice);
+            }
+
+            const existingProd = db.prepare("SELECT id FROM catalog_products WHERE LOWER(name) = LOWER(?)").get(cleanName);
+            if (existingProd) {
+                db.prepare(
+                    `UPDATE catalog_products
+                     SET category = ?,
+                         default_unit = CASE WHEN ? != '' THEN ? ELSE default_unit END,
+                         last_fornitore = ?,
+                         last_unit_price = CASE WHEN ? > 0 THEN ? ELSE last_unit_price END
+                     WHERE id = ?`
+                ).run(cleanCat, cleanUnit, cleanUnit, cleanForn, uPrice, uPrice, existingProd.id);
+            } else {
+                db.prepare(
+                    "INSERT INTO catalog_products (name, category, default_unit, last_unit_price, last_fornitore, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+                ).run(cleanName, cleanCat, cleanUnit, uPrice, cleanForn, ts);
+            }
+        }
+
+        // 2. Verifica che esista la lista del 07/11/2026 (o successiva); se non esiste ancora, creala con tutti i prodotti del catalogo e quantità a zero
+        let keptList = db
+            .prepare("SELECT id, list_date FROM shopping_lists WHERE list_date > ? ORDER BY list_date DESC, id DESC LIMIT 1")
+            .get(cutoffDate);
+
+        if (!keptList) {
+            const info = db
+                .prepare(
+                    "INSERT INTO shopping_lists (name, list_date, fornitore, created_by, created_at, updated_at) VALUES (?, '2026-11-07', 'Aldi', NULL, ?, ?)"
+                )
+                .run("Lista Supermercato", ts, ts);
+            keptList = { id: Number(info.lastInsertRowid), list_date: "2026-11-07" };
+        }
+
+        // Assicura che nella lista del 7 novembre siano presenti tutti i prodotti del catalogo (senza toccare quelli già presenti)
+        const existingInKept = new Set(
+            db
+                .prepare("SELECT name FROM shopping_list_items WHERE list_id = ?")
+                .all(keptList.id)
+                .map((r) => String(r.name || "").trim().toLowerCase())
+        );
+        const catalogProds = db
+            .prepare(
+                "SELECT id, name, category, default_unit, COALESCE(last_unit_price, 0) AS last_unit_price, COALESCE(NULLIF(last_fornitore, ''), 'Aldi') AS last_fornitore FROM catalog_products ORDER BY name COLLATE NOCASE ASC"
+            )
+            .all();
+        const insItem = db.prepare(
+            `INSERT INTO shopping_list_items
+             (list_id, product_id, name, category, unit, quantity, unit_price, total_price, fornitore, in_list, purchased, notes, updated_at)
+             VALUES (?, ?, ?, ?, ?, '', ?, 0, ?, 0, 0, '', ?)`
+        );
+        for (const p of catalogProds) {
+            const key = String(p.name || "").trim().toLowerCase();
+            if (key && !existingInKept.has(key)) {
+                const forn = p.last_fornitore || "Aldi";
+                const price = getSupplierPrice(p.name, forn) || roundMoney(parseNumber(p.last_unit_price, 0));
+                insItem.run(keptList.id, p.id, p.name, p.category || "ALIMENTARI", p.default_unit || "", price, forn, ts);
+                existingInKept.add(key);
+            }
+        }
+
+        // 3. Cancella tutti gli acquisti e le liste datate <= 2026-11-06
+        db.prepare("DELETE FROM acquisti WHERE data_acquisto <= ?").run(cutoffDate);
+        db.prepare("DELETE FROM shopping_list_items WHERE list_id IN (SELECT id FROM shopping_lists WHERE list_date <= ?)").run(cutoffDate);
+        db.prepare("DELETE FROM shopping_lists WHERE list_date <= ?").run(cutoffDate);
+    } catch (err) {
+        console.error("Errore pulizia liste fino al 06/11/2026:", err);
+    }
 })();
 
 function ensureSupplierExists(nome) {
