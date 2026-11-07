@@ -1614,7 +1614,8 @@ async function handleRequest(req, res) {
             const isInline = urlObj.searchParams.get("inline") === "1";
             const forceDownload = urlObj.searchParams.get("download") === "1";
             res.writeHead(200, {
-                "Content-Type": forceDownload ? "application/octet-stream" : "application/pdf",
+                "Content-Type": forceDownload ? "application/x-download" : "application/pdf",
+                "X-Content-Type-Options": "nosniff",
                 "Content-Disposition": `${isInline && !forceDownload ? "inline" : "attachment"}; filename="${fileName}"`,
                 "Content-Length": pdfBuffer.length,
                 "Cache-Control": "no-store",
@@ -2237,7 +2238,8 @@ async function handleRequest(req, res) {
             const isInline = urlObj.searchParams.get("inline") === "1";
             const forceDownload = urlObj.searchParams.get("download") === "1";
             res.writeHead(200, {
-                "Content-Type": forceDownload ? "application/octet-stream" : "application/pdf",
+                "Content-Type": forceDownload ? "application/x-download" : "application/pdf",
+                "X-Content-Type-Options": "nosniff",
                 "Content-Disposition": `${isInline && !forceDownload ? "inline" : "attachment"}; filename="${fileName}"`,
                 "Content-Length": pdfBuffer.length,
                 "Cache-Control": "no-store",

@@ -2319,38 +2319,39 @@ function openMobilePdfModal(pdfUrl, fileName, filterLabel) {
     document.body.classList.add("printing-mobile-pdf");
     overlay.classList.remove("hidden");
 
-    // Rileva se siamo su Chrome (CriOS su iPhone o Chrome su Android) oppure su Safari (o WebApp Home iOS)
+    // Rileva se siamo su iOS e/o su Chrome (CriOS su iPhone o Chrome su Android)
     const ua = navigator.userAgent || "";
     const isChrome = /CriOS|Chrome|Chromium|EdgA/i.test(ua);
-    const currentPort = Number(window.location.port || 8090);
-    const pdfPort = currentPort + 1;
+    const isIOS =
+        /iPhone|iPad|iPod/i.test(ua) ||
+        (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
-    // - Su Chrome: usa &download=1 (Content-Type: application/octet-stream + Content-Disposition: attachment) così Chrome
-    //   NON apre l'anteprima bloccata senza pulsanti, ma fa comparire in basso la barra nativa
-    //   "Scarica / Télécharger" -> "Apri in... / Ouvrir dans..." da cui inviare il file PDF su WhatsApp o Stamparlo.
-    // - Su Safari (inclusa la WebApp salvata sulla schermata Home di iPhone): usa la porta secondaria (8091) con &inline=1
-    //   così iOS apre il vero file PDF nella vista Safari dotata della barra inferiore con il tasto Condividi (⬆️) -> WhatsApp (PDF) / Stampa.
+    // Usa SEMPRE &download=1 (Content-Type: application/x-download + X-Content-Type-Options: nosniff + Content-Disposition: attachment):
+    // in questo modo iOS/Chrome NON apre MAI l'anteprima PDF bloccata senza pulsanti, ma resta sulla schermata attuale
+    // e fa comparire la barra nativa "Scarica / Télécharger" -> "Apri in... / Ouvrir dans..." da cui scegliere WhatsApp o Stampa.
+    // Se l'app è stata aperta da un'icona WebClip della schermata Home iOS (window.navigator.standalone === true),
+    // passa direttamente a Google Chrome tramite googlechrome:// così la barra di download/condivisione è sempre presente.
     const downloadPdfPath = `${pdfUrl}&download=1`;
-    const safariPdfUrl = `${window.location.protocol}//${window.location.hostname}:${pdfPort}${pdfUrl}&inline=1`;
-    const targetPdfHref = isChrome ? downloadPdfPath : safariPdfUrl;
+    let targetPdfHref = downloadPdfPath;
+    if (isIOS && window.navigator.standalone === true) {
+        const scheme = window.location.protocol === "https:" ? "googlechromes:" : "googlechrome:";
+        targetPdfHref = `${scheme}//${window.location.host}${downloadPdfPath}`;
+    }
 
     const hintEl = document.getElementById("mobile-pdf-hint");
     if (hintEl) {
-        if (isChrome) {
-            hintEl.innerHTML = `💡 Tocca <strong>💬 WhatsApp PDF</strong> o <strong>🖨️ Stampa / PDF</strong>: in basso su Chrome comparirà <strong>Scarica / Télécharger</strong> e subito dopo <strong>Apri in... / Ouvrir dans...</strong> → scegli <strong>WhatsApp</strong> (per inviare il PDF) o <strong>Stampa / Imprimer</strong>!`;
+        if (isChrome || (isIOS && window.navigator.standalone === true)) {
+            hintEl.innerHTML = `💡 Tocca <strong>💬 WhatsApp PDF</strong> o <strong>🖨️ Stampa / PDF</strong>: in basso sullo schermo comparirà <strong>Scarica / Télécharger</strong> e subito dopo <strong>Apri in... / Ouvrir dans...</strong> → scegli <strong>WhatsApp</strong> (per inviare il PDF) o <strong>Stampa / Imprimer</strong>!`;
         } else {
-            hintEl.innerHTML = `💡 Tocca <strong>💬 WhatsApp PDF</strong> o <strong>🖨️ Stampa / PDF</strong>: si aprirà il PDF con la barra in basso → tocca l'icona <strong>Condividi ⬆️</strong> e scegli <strong>WhatsApp</strong> (per inviare il PDF) o <strong>Stampa / Imprimer</strong>!`;
+            hintEl.innerHTML = `💡 Tocca <strong>💬 WhatsApp PDF</strong> o <strong>🖨️ Stampa / PDF</strong>: nel pannello che si apre tocca l'icona <strong>Condividi ⬆️</strong> (in alto a destra) per inviare il <strong>PDF su WhatsApp</strong> oppure premi <strong>Stampa / Imprimer</strong>!`;
         }
     }
 
     const bindPdfActionButton = (btnEl, actionKind) => {
         if (!btnEl) return;
         btnEl.href = targetPdfHref;
-        if (isChrome) {
-            btnEl.removeAttribute("target");
-        } else {
-            btnEl.setAttribute("target", "_blank");
-        }
+        btnEl.removeAttribute("target");
+        btnEl.setAttribute("download", fileName);
         btnEl.onclick = (e) => {
             if (currentMobilePdfFile && typeof navigator.share === "function") {
                 let canShareFile = true;
@@ -2372,12 +2373,18 @@ function openMobilePdfModal(pdfUrl, fileName, filterLabel) {
                     return;
                 }
             }
-            if (isChrome) {
-                if (actionKind === "whatsapp") {
-                    showToast("💬 In basso tocca 'Scarica / Télécharger' → 'Apri in / Ouvrir dans' → WhatsApp!", "success");
-                } else {
-                    showToast("🖨️ In basso tocca 'Scarica / Télécharger' → 'Apri in / Ouvrir dans' → Stampa / Imprimer!", "success");
-                }
+            // Su Safari standard (non Chrome e non WebClip bloccata), window.print() apre il pannello nativo iOS
+            // che ha sia "Stampa / Imprimer" sia l'icona "Condividi ⬆️" (in alto a destra) che invia il PDF direttamente a WhatsApp!
+            if (isIOS && !isChrome && window.navigator.standalone !== true) {
+                e.preventDefault();
+                document.body.classList.add("printing-mobile-pdf");
+                window.print();
+                return;
+            }
+            if (actionKind === "whatsapp") {
+                showToast("💬 In basso tocca 'Scarica / Télécharger' → 'Apri in / Ouvrir dans' → WhatsApp!", "success");
+            } else {
+                showToast("🖨️ In basso tocca 'Scarica / Télécharger' → 'Apri in / Ouvrir dans' → Stampa / Imprimer!", "success");
             }
         };
     };
