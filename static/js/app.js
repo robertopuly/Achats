@@ -2300,39 +2300,46 @@ function openMobilePdfModal(pdfUrl, fileName, filterLabel) {
 
     document.body.classList.add("printing-mobile-pdf");
     overlay.classList.remove("hidden");
+
+    // 1. Configura il pulsante "🖨️ Stampa / PDF" per aprire il vero file PDF in Safari (anche se l'app è nella Schermata Home di iPhone!)
+    const openPdfBtn = document.getElementById("btn-mobile-pdf-open");
+    if (openPdfBtn) {
+        const inlinePdfPath = `${pdfUrl}&inline=1`;
+        const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+        if (isIOS && window.navigator.standalone === true) {
+            // Quando l'app è aperta dall'icona sulla Schermata Home di iOS, x-safari-http:// apre il PDF direttamente in Safari (con i tasti Stampa e Condividi di iOS) senza bloccare l'app!
+            openPdfBtn.href = `x-safari-${window.location.protocol}//${window.location.host}${inlinePdfPath}`;
+            openPdfBtn.removeAttribute("target");
+        } else {
+            openPdfBtn.href = inlinePdfPath;
+            openPdfBtn.setAttribute("target", "_blank");
+        }
+    }
+
+    // 2. Configura il pulsante "💬 WhatsApp" con il testo formattato della lista
+    const waBtn = document.getElementById("btn-mobile-pdf-whatsapp");
+    if (waBtn) {
+        const lines = [`🛒 *${state.currentList.name || "Lista Supermercato"}* (${listDateIT})`, `Filtro: ${filterLabel} • ${suppFilterLabel}`, ""];
+        for (const [catName, items] of groups.entries()) {
+            lines.push(`*— ${catName} —*`);
+            const sortedItems = [...items].sort((a, b) => a.name.localeCompare(b.name, "it", { sensitivity: "base" }));
+            for (const it of sortedItems) {
+                const q = String(it.quantity || "").trim() || (it.purchased === 1 ? "1" : "1");
+                const u = it.unit || "Pz";
+                const forn = it.fornitore || state.currentList?.fornitore || "Aldi";
+                const note = it.notes ? ` (${it.notes})` : "";
+                const check = it.purchased === 1 ? "✅" : "▫️";
+                lines.push(`${check} ${it.name}${note}: *${q} ${u}* [${forn}]`);
+            }
+            lines.push("");
+        }
+        waBtn.href = `https://wa.me/?text=${encodeURIComponent(lines.join("\n"))}`;
+    }
 }
 
 function closeMobilePdfModal() {
     document.body.classList.remove("printing-mobile-pdf");
     document.getElementById("modal-mobile-pdf")?.classList.add("hidden");
-}
-
-function printMobilePdfSheet() {
-    document.body.classList.add("printing-mobile-pdf");
-    window.print();
-}
-
-async function shareOrPrintMobilePdf() {
-    try {
-        if (navigator.share && currentMobilePdfUrl) {
-            const res = await fetch(currentMobilePdfUrl, { credentials: "same-origin" });
-            if (res.ok) {
-                const blob = await res.blob();
-                const file = new File([blob], currentMobilePdfFileName, { type: "application/pdf" });
-                if (!navigator.canShare || navigator.canShare({ files: [file] })) {
-                    await navigator.share({
-                        files: [file],
-                        title: currentMobilePdfFileName,
-                    });
-                    return;
-                }
-            }
-        }
-    } catch (err) {
-        if (err && err.name === "AbortError") return;
-    }
-    // Se la condivisione file diretta non è attiva (es. connessione HTTP su iOS), apre il pannello nativo Stampa/Condividi PDF di iOS/Android
-    printMobilePdfSheet();
 }
 
 function downloadPurchasesPdf() {

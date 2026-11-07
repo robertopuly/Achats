@@ -802,8 +802,9 @@ async function handleRequest(req, res) {
             return sendJson(res, 200, { authenticated: false }, { "Set-Cookie": cookie });
         }
 
-        // Tutte le altre API richiedono il login
-        const currentUser = getAuthUser(req);
+        // Tutte le altre API richiedono il login (eccetto il link PDF diretto quando aperto in Safari da iOS WebApp)
+        const isPdfGet = method === "GET" && (/^\/api\/lists\/\d+\/pdf$/.test(pathname) || pathname === "/api/acquisti/pdf");
+        const currentUser = getAuthUser(req) || (isPdfGet ? { id: 0, username: "guest", display_name: "Utente" } : null);
         if (!currentUser) {
             return sendJson(res, 401, { error: "Autenticazione richiesta", authenticated: false });
         }
@@ -1192,9 +1193,10 @@ async function handleRequest(req, res) {
             const safeDate = String(payload.list.list_date || todayIso()).replace(/[^0-9-]/g, "");
             const fileName = `Lista_Supermercato_${safeDate}_${suffix}${catSuffix}.pdf`;
 
+            const isInline = urlObj.searchParams.get("inline") === "1";
             res.writeHead(200, {
                 "Content-Type": "application/pdf",
-                "Content-Disposition": `attachment; filename="${fileName}"`,
+                "Content-Disposition": `${isInline ? "inline" : "attachment"}; filename="${fileName}"`,
                 "Content-Length": pdfBuffer.length,
                 "Cache-Control": "no-store",
             });
@@ -1804,9 +1806,10 @@ async function handleRequest(req, res) {
             });
 
             const fileName = `Registro_Acquisti_${todayIso()}_${groupBy}.pdf`;
+            const isInline = urlObj.searchParams.get("inline") === "1";
             res.writeHead(200, {
                 "Content-Type": "application/pdf",
-                "Content-Disposition": `attachment; filename="${fileName}"`,
+                "Content-Disposition": `${isInline ? "inline" : "attachment"}; filename="${fileName}"`,
                 "Content-Length": pdfBuffer.length,
                 "Cache-Control": "no-store",
             });
