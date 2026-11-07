@@ -195,7 +195,26 @@ function getSupplierPrice(productName, fornitore) {
     const cleanForn = String(fornitore || "Aldi").trim() || "Aldi";
     if (!cleanName) return 0;
 
-    // 1. Cerca nella tabella prezzi (Prodotto + Fornitore)
+    // 1. Priorità assoluta: l'ultimo prezzo inserito/corretto nell'ultima lista (in ordine di data list_date DESC) per quel fornitore
+    const fromLatestList = db
+        .prepare(
+            `SELECT i.unit_price
+             FROM shopping_list_items i
+             JOIN shopping_lists l ON l.id = i.list_id
+             WHERE LOWER(i.name) = LOWER(?)
+               AND LOWER(COALESCE(NULLIF(i.fornitore, ''), 'Aldi')) = LOWER(?)
+               AND i.unit_price > 0
+             ORDER BY l.list_date DESC, l.id DESC, i.updated_at DESC, i.id DESC
+             LIMIT 1`
+        )
+        .get(cleanName, cleanForn);
+    if (fromLatestList && Number(fromLatestList.unit_price) > 0) {
+        const p = roundMoney(fromLatestList.unit_price);
+        saveSupplierPrice(cleanName, cleanForn, p);
+        return p;
+    }
+
+    // 2. Cerca nella tabella prezzi (Prodotto + Fornitore)
     const direct = db
         .prepare(
             "SELECT unit_price FROM product_supplier_prices WHERE LOWER(product_name) = LOWER(?) AND LOWER(fornitore) = LOWER(?)"
@@ -205,7 +224,7 @@ function getSupplierPrice(productName, fornitore) {
         return roundMoney(direct.unit_price);
     }
 
-    // 2. Cerca nell'ultimo acquisto registrato nel database per quello specifico fornitore
+    // 3. Cerca nell'ultimo acquisto registrato nel database per quello specifico fornitore
     const fromAcq = db
         .prepare(
             `SELECT prezzo_unitario FROM acquisti
@@ -219,16 +238,17 @@ function getSupplierPrice(productName, fornitore) {
         return p;
     }
 
-    // 3. Cerca nelle liste precedenti per quello specifico fornitore
-    const fromItems = db
+    // 4. Fallback sul catalogo base se il fornitore coincide (o se non era specificato)
+    const fromCat = db
         .prepare(
-            `SELECT unit_price FROM shopping_list_items
-             WHERE LOWER(name) = LOWER(?) AND LOWER(fornitore) = LOWER(?) AND unit_price > 0
-             ORDER BY id DESC LIMIT 1`
+            `SELECT last_unit_price, COALESCE(NULLIF(last_fornitore, ''), 'Aldi') AS last_fornitore
+             FROM catalog_products
+             WHERE LOWER(name) = LOWER(?) AND last_unit_price > 0
+             LIMIT 1`
         )
-        .get(cleanName, cleanForn);
-    if (fromItems && Number(fromItems.unit_price) > 0) {
-        const p = roundMoney(fromItems.unit_price);
+        .get(cleanName);
+    if (fromCat && Number(fromCat.last_unit_price) > 0 && fromCat.last_fornitore.toLowerCase() === cleanForn.toLowerCase()) {
+        const p = roundMoney(fromCat.last_unit_price);
         saveSupplierPrice(cleanName, cleanForn, p);
         return p;
     }
@@ -236,23 +256,70 @@ function getSupplierPrice(productName, fornitore) {
     return 0;
 }
 
-// Popola inizialmente product_supplier_prices dallo storico esistente
-(function backfillSupplierPrices() {
+// Sincronizza product_supplier_prices rispettando l'ordine cronologico delle liste (list_date ASC)
+// e compila eventuali prezzi mancanti nella lista attiva usando gli ultimi prezzi registrati
+function syncAndBackfillLatestPrices() {
     try {
-        const itemRows = db
-            .prepare("SELECT name, COALESCE(NULLIF(fornitore, ''), 'Aldi') AS forn, unit_price FROM shopping_list_items WHERE unit_price > 0 ORDER BY id ASC")
+        // 1. Catalogo base (solo se non già presente in product_supplier_prices)
+        const catRows = db
+            .prepare(
+                "SELECT name, COALESCE(NULLIF(last_fornitore, ''), 'Aldi') AS forn, last_unit_price FROM catalog_products WHERE last_unit_price > 0"
+            )
             .all();
-        for (const r of itemRows) {
-            saveSupplierPrice(r.name, r.forn, r.unit_price);
+        for (const r of catRows) {
+            const exists = db
+                .prepare("SELECT 1 FROM product_supplier_prices WHERE LOWER(product_name) = LOWER(?) AND LOWER(fornitore) = LOWER(?)")
+                .get(r.name, r.forn);
+            if (!exists) {
+                saveSupplierPrice(r.name, r.forn, r.last_unit_price);
+            }
         }
+
+        // 2. Acquisti in ordine di data_acquisto ASC
         const acqRows = db
-            .prepare("SELECT descrizione_prodotto, COALESCE(NULLIF(fornitore, ''), 'Aldi') AS forn, prezzo_unitario FROM acquisti WHERE prezzo_unitario > 0 ORDER BY data_acquisto ASC, id ASC")
+            .prepare(
+                "SELECT descrizione_prodotto, COALESCE(NULLIF(fornitore, ''), 'Aldi') AS forn, prezzo_unitario FROM acquisti WHERE prezzo_unitario > 0 ORDER BY data_acquisto ASC, updated_at ASC, id ASC"
+            )
             .all();
         for (const r of acqRows) {
             saveSupplierPrice(r.descrizione_prodotto, r.forn, r.prezzo_unitario);
         }
+
+        // 3. Voci delle liste in ordine di data della lista (list_date ASC) e ultimo aggiornamento (updated_at ASC),
+        //    così i prezzi dell'ultima lista (in ordine di data) e le ultime correzioni sono SEMPRE il prezzo corrente
+        const itemRows = db
+            .prepare(
+                `SELECT i.name, COALESCE(NULLIF(i.fornitore, ''), 'Aldi') AS forn, i.unit_price
+                 FROM shopping_list_items i
+                 JOIN shopping_lists l ON l.id = i.list_id
+                 WHERE i.unit_price > 0
+                 ORDER BY l.list_date ASC, l.id ASC, i.updated_at ASC, i.id ASC`
+            )
+            .all();
+        for (const r of itemRows) {
+            saveSupplierPrice(r.name, r.forn, r.unit_price);
+            db.prepare(
+                "UPDATE catalog_products SET last_unit_price = ?, last_fornitore = ? WHERE LOWER(name) = LOWER(?)"
+            ).run(roundMoney(r.unit_price), r.forn, r.name);
+        }
+
+        // 4. Se nella lista attiva ci sono prodotti con unit_price = 0 ma esiste un ultimo prezzo valido per quel fornitore, applicalo
+        const zeroItems = db
+            .prepare(
+                "SELECT id, name, quantity, COALESCE(NULLIF(fornitore, ''), 'Aldi') AS forn FROM shopping_list_items WHERE COALESCE(unit_price, 0) <= 0"
+            )
+            .all();
+        const updZero = db.prepare("UPDATE shopping_list_items SET unit_price = ?, total_price = ? WHERE id = ?");
+        for (const z of zeroItems) {
+            const latestP = getSupplierPrice(z.name, z.forn);
+            if (latestP > 0) {
+                const qNum = parseNumber(z.quantity, 0);
+                updZero.run(latestP, roundMoney(qNum * latestP), z.id);
+            }
+        }
     } catch (_) {}
-})();
+}
+syncAndBackfillLatestPrices();
 
 // Popolamento automatico categorie e catalogo iniziale se il database è nuovo
 (function seedInitialDatabaseIfEmpty() {
@@ -520,6 +587,8 @@ function getSupplierPrice(productName, fornitore) {
                 }
             }
         }
+        // Riallinea anche i prezzi della lista mantenuta dopo la pulizia/divisione
+        syncAndBackfillLatestPrices();
     } catch (err) {
         console.error("Errore split/rename prodotti:", err);
     }
@@ -1122,10 +1191,14 @@ async function handleRequest(req, res) {
             const source_list_id = data.source_list_id;
             const ts = nowIso();
 
-            // Individua la lista più recente (o la source_list_id) da cui riprendere prodotti e fornitori aggiornati
-            const latestSourceList = source_list_id
-                ? db.prepare("SELECT id FROM shopping_lists WHERE id = ?").get(source_list_id)
-                : db.prepare("SELECT id FROM shopping_lists ORDER BY list_date DESC, id DESC LIMIT 1").get();
+            // Individua SEMPRE l'ultima lista in ordine di data (list_date DESC, id DESC) per riprendere gli ultimi prezzi e fornitori
+            const latestByDateList = db
+                .prepare("SELECT id FROM shopping_lists ORDER BY list_date DESC, id DESC LIMIT 1")
+                .get();
+            const copySourceList =
+                mode === "copy" && source_list_id
+                    ? db.prepare("SELECT id FROM shopping_lists WHERE id = ?").get(source_list_id) || latestByDateList
+                    : latestByDateList;
 
             const info = db
                 .prepare("INSERT INTO shopping_lists (name, list_date, fornitore, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
@@ -1138,15 +1211,17 @@ async function handleRequest(req, res) {
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
             );
 
-            if (mode === "copy" && latestSourceList) {
+            if (mode === "copy" && copySourceList) {
                 const srcItems = db
                     .prepare(
                         "SELECT product_id, name, category, unit, quantity, unit_price, total_price, fornitore, in_list FROM shopping_list_items WHERE list_id = ? ORDER BY category ASC, name COLLATE NOCASE ASC"
                     )
-                    .all(latestSourceList.id);
+                    .all(copySourceList.id);
                 for (const it of srcItems) {
                     const itemForn = ensureSupplierExists(it.fornitore || "Aldi");
-                    const itemPrice = getSupplierPrice(it.name, itemForn) || roundMoney(parseNumber(it.unit_price, 0));
+                    const directPrice = roundMoney(parseNumber(it.unit_price, 0));
+                    const itemPrice = directPrice > 0 ? directPrice : getSupplierPrice(it.name, itemForn);
+                    if (itemPrice > 0) saveSupplierPrice(it.name, itemForn, itemPrice);
                     const qtyNum = parseNumber(it.quantity, 0);
                     insertItem.run(
                         newListId,
@@ -1164,22 +1239,26 @@ async function handleRequest(req, res) {
                     );
                 }
             } else if (mode !== "empty") {
-                // Riprende la lista aggiornata (dalla lista più recente + eventuali prodotti del catalogo base),
-                // mantenendo il fornitore di ciascun prodotto, azzerando le quantità e applicando l'ultimo prezzo per quel fornitore
+                // Riprende la lista aggiornata dall'ULTIMA lista in ordine di data (list_date DESC),
+                // mantenendo il fornitore di ciascun prodotto, azzerando le quantità e utilizzando l'ultimo prezzo unitario inserito/corretto
                 const mergedMap = new Map();
 
-                if (latestSourceList) {
+                if (latestByDateList) {
                     const prevItems = db
                         .prepare(
                             "SELECT product_id, name, category, unit, unit_price, fornitore FROM shopping_list_items WHERE list_id = ? ORDER BY id ASC"
                         )
-                        .all(latestSourceList.id);
+                        .all(latestByDateList.id);
                     for (const it of prevItems) {
                         const key = String(it.name || "").trim().toLowerCase();
                         if (!key) continue;
                         const itemForn = ensureSupplierExists(it.fornitore || "Aldi");
+                        const directPrice = roundMoney(parseNumber(it.unit_price, 0));
                         const latestPriceForSupplier =
-                            getSupplierPrice(it.name, itemForn) || roundMoney(parseNumber(it.unit_price, 0));
+                            directPrice > 0 ? directPrice : getSupplierPrice(it.name, itemForn);
+                        if (latestPriceForSupplier > 0) {
+                            saveSupplierPrice(it.name, itemForn, latestPriceForSupplier);
+                        }
                         mergedMap.set(key, {
                             product_id: it.product_id,
                             name: it.name,
@@ -1566,6 +1645,15 @@ async function handleRequest(req, res) {
 
                 if (unit_price > 0) {
                     saveSupplierPrice(name, fornitore, unit_price);
+                    // Aggiorna subito anche il prezzo corrente per questo prodotto e fornitore in altre eventuali liste future/attive
+                    db.prepare(
+                        "UPDATE catalog_products SET last_unit_price = ?, last_fornitore = ? WHERE LOWER(name) = LOWER(?)"
+                    ).run(unit_price, fornitore, name);
+                } else if ("unit_price" in data && roundMoney(parseNumber(data.unit_price, 0)) === 0) {
+                    // Se l'utente ha azzerato manualmente il prezzo, rimuove il vecchio prezzo salvato per quel fornitore
+                    db.prepare(
+                        "DELETE FROM product_supplier_prices WHERE LOWER(product_name) = LOWER(?) AND LOWER(fornitore) = LOWER(?)"
+                    ).run(name, fornitore);
                 }
 
                 const qtyNum = parseNumber(quantity, 0);
