@@ -2304,15 +2304,26 @@ function openMobilePdfModal(pdfUrl, fileName, filterLabel) {
     document.body.classList.add("printing-mobile-pdf");
     overlay.classList.remove("hidden");
 
-    // 1. Configura il pulsante "🖨️ Stampa / PDF" per aprire il vero file PDF in Safari (usando la porta secondaria 8091 così iOS apre Safari con la barra Condividi/Stampa senza bloccare l'app!)
+    // 1. Configura il pulsante "🖨️ Stampa / PDF":
+    //    - Usa &download=1 (Content-Type: application/octet-stream + Content-Disposition: attachment) così Chrome su iPhone/Android
+    //      NON apre l'anteprima bloccata senza pulsanti, ma fa comparire in basso la barra nativa "Scarica / Télécharger" -> "Apri in... / Ouvrir dans..."
+    //      che apre il menu di sistema iOS/Android con "Stampa / Imprimer", "Salva su File", ecc.
+    //    - Se l'app è stata aperta da un'icona WebClip della schermata Home iOS (window.navigator.standalone === true),
+    //      usa lo schema googlechrome:// per passare direttamente all'app Google Chrome con la barra completa.
     const openPdfBtn = document.getElementById("btn-mobile-pdf-open");
     if (openPdfBtn) {
-        const inlinePdfPath = `${pdfUrl}&inline=1`;
-        const currentPort = Number(window.location.port || 8090);
-        const pdfPort = currentPort + 1;
-        const externalOriginUrl = `${window.location.protocol}//${window.location.hostname}:${pdfPort}${inlinePdfPath}`;
-        openPdfBtn.href = externalOriginUrl;
-        openPdfBtn.setAttribute("target", "_blank");
+        const downloadPdfPath = `${pdfUrl}&download=1`;
+        const isIOS =
+            /iPhone|iPad|iPod/i.test(navigator.userAgent || "") ||
+            (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+        if (isIOS && window.navigator.standalone === true) {
+            const scheme = window.location.protocol === "https:" ? "googlechromes:" : "googlechrome:";
+            openPdfBtn.href = `${scheme}//${window.location.host}${downloadPdfPath}`;
+            openPdfBtn.removeAttribute("target");
+        } else {
+            openPdfBtn.href = downloadPdfPath;
+            openPdfBtn.removeAttribute("target");
+        }
     }
 
     // 2. Configura il pulsante "💬 WhatsApp" con il testo formattato della lista

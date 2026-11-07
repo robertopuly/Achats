@@ -1612,9 +1612,10 @@ async function handleRequest(req, res) {
             const fileName = `Lista_Supermercato_${safeDate}_${suffix}${catSuffix}.pdf`;
 
             const isInline = urlObj.searchParams.get("inline") === "1";
+            const forceDownload = urlObj.searchParams.get("download") === "1";
             res.writeHead(200, {
-                "Content-Type": "application/pdf",
-                "Content-Disposition": `${isInline ? "inline" : "attachment"}; filename="${fileName}"`,
+                "Content-Type": forceDownload ? "application/octet-stream" : "application/pdf",
+                "Content-Disposition": `${isInline && !forceDownload ? "inline" : "attachment"}; filename="${fileName}"`,
                 "Content-Length": pdfBuffer.length,
                 "Cache-Control": "no-store",
             });
@@ -2234,9 +2235,10 @@ async function handleRequest(req, res) {
 
             const fileName = `Registro_Acquisti_${todayIso()}_${groupBy}.pdf`;
             const isInline = urlObj.searchParams.get("inline") === "1";
+            const forceDownload = urlObj.searchParams.get("download") === "1";
             res.writeHead(200, {
-                "Content-Type": "application/pdf",
-                "Content-Disposition": `${isInline ? "inline" : "attachment"}; filename="${fileName}"`,
+                "Content-Type": forceDownload ? "application/octet-stream" : "application/pdf",
+                "Content-Disposition": `${isInline && !forceDownload ? "inline" : "attachment"}; filename="${fileName}"`,
                 "Content-Length": pdfBuffer.length,
                 "Cache-Control": "no-store",
             });
