@@ -2154,6 +2154,9 @@ async function importCurrentListToDb(mode = "active") {
 // ============================================================================
 // ESPORTAZIONE PDF (LISTA DELLA SPESA & TABELLA ACQUISTI)
 // ============================================================================
+let currentMobilePdfUrl = "";
+let currentMobilePdfFileName = "Lista_Supermercato.pdf";
+
 function downloadCurrentViewPdf() {
     if (!state.currentList) return;
     const params = new URLSearchParams({
@@ -2169,14 +2172,167 @@ function downloadCurrentViewPdf() {
         active: "Solo in Lista",
         purchased: "Acquistati",
     };
-    showToast(`📄 Creazione PDF (${filterNames[state.filterMode] || "Lista"})...`, "success");
+    const suffixMap = {
+        all: "Completa",
+        active: "Solo_in_Lista",
+        purchased: "Acquistati",
+    };
+    const safeDate = String(state.currentList.list_date || todayISO()).replace(/[^0-9-]/g, "");
+    const fileName = `Lista_Supermercato_${safeDate}_${suffixMap[state.filterMode] || "Lista"}.pdf`;
 
+    // Su Smartphone apri l'anteprima interna con la barra di uscita, stampa e condivisione (senza bloccare la pagina)
+    if (isSmartphoneDevice() || window.navigator.standalone === true) {
+        openMobilePdfModal(pdfUrl, fileName, filterNames[state.filterMode] || "Lista");
+        return;
+    }
+
+    showToast(`📄 Creazione PDF (${filterNames[state.filterMode] || "Lista"})...`, "success");
     const a = document.createElement("a");
     a.href = pdfUrl;
+    a.download = fileName;
     a.style.display = "none";
     document.body.appendChild(a);
     a.click();
     setTimeout(() => a.remove(), 1000);
+}
+
+function openMobilePdfModal(pdfUrl, fileName, filterLabel) {
+    currentMobilePdfUrl = pdfUrl;
+    currentMobilePdfFileName = fileName;
+
+    const sheet = document.getElementById("mobile-pdf-sheet");
+    const overlay = document.getElementById("modal-mobile-pdf");
+    if (!sheet || !overlay || !state.currentList) return;
+
+    const filtered = getFilteredItems();
+    const listDateIT = formatDateIT(state.currentList.list_date);
+    const suppFilterLabel =
+        state.selectedSupplier && state.selectedSupplier !== "ALL"
+            ? state.selectedSupplier
+            : "Tutti i fornitori";
+
+    let totalMoney = 0;
+    for (const i of filtered) {
+        const q = parseFloat(String(i.quantity || "0").replace(",", ".")) || (i.purchased === 1 ? 1 : 0);
+        const p = Number(i.unit_price || 0);
+        if (q > 0 && p > 0) totalMoney += q * p;
+    }
+
+    const groups = new Map();
+    for (const item of filtered) {
+        const cKey = (item.category || "ALTRO").toUpperCase();
+        if (!groups.has(cKey)) groups.set(cKey, []);
+        groups.get(cKey).push(item);
+    }
+
+    let groupsHtml = "";
+    if (filtered.length === 0) {
+        groupsHtml = `<p style="padding:20px 0; text-align:center; color:#64748b;">Nessun prodotto presente con il filtro selezionato.</p>`;
+    } else {
+        for (const [catName, items] of groups.entries()) {
+            const sortedItems = [...items].sort((a, b) =>
+                a.name.localeCompare(b.name, "it", { sensitivity: "base" })
+            );
+            const rowsHtml = sortedItems
+                .map((it) => {
+                    const q = String(it.quantity || "").trim() || (it.purchased === 1 ? "1" : "—");
+                    const u = it.unit || "Pz";
+                    const forn = it.fornitore || state.currentList?.fornitore || "Aldi";
+                    const up = Number(it.unit_price || 0);
+                    const qNum = parseFloat(String(it.quantity || "0").replace(",", ".")) || (it.purchased === 1 ? 1 : 0);
+                    const tot = qNum > 0 && up > 0 ? (qNum * up).toFixed(2) : "—";
+                    const note = it.notes ? ` <span style="color:#64748b; font-size:0.74rem;">(${escapeHtml(it.notes)})</span>` : "";
+                    const status = it.purchased === 1 ? "✓ Acq." : "☐";
+                    return `
+                        <tr>
+                            <td style="width:26px;">${status}</td>
+                            <td><strong>${escapeHtml(it.name)}</strong>${note}</td>
+                            <td>${escapeHtml(forn)}</td>
+                            <td class="num"><strong>${escapeHtml(q)}</strong> ${escapeHtml(u)}</td>
+                            <td class="num">${up > 0 ? up.toFixed(2) : "—"}</td>
+                            <td class="num">${tot}</td>
+                        </tr>
+                    `;
+                })
+                .join("");
+
+            groupsHtml += `
+                <div class="mpdf-cat-block">
+                    <div class="mpdf-cat-title">
+                        <span>${escapeHtml(catName)}</span>
+                        <span>${sortedItems.length} prod.</span>
+                    </div>
+                    <table class="mpdf-table">
+                        <thead>
+                            <tr>
+                                <th>St.</th>
+                                <th>Prodotto</th>
+                                <th>Forn.</th>
+                                <th class="num">Q.tà</th>
+                                <th class="num">Prezzo</th>
+                                <th class="num">Tot.</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rowsHtml}</tbody>
+                    </table>
+                </div>
+            `;
+        }
+    }
+
+    sheet.innerHTML = `
+        <div class="mpdf-header">
+            <div>
+                <div class="mpdf-title">🛒 ${escapeHtml(state.currentList.name || "Lista Supermercato")}</div>
+                <div class="mpdf-meta">
+                    📅 Data: <strong>${escapeHtml(listDateIT)}</strong> •
+                    Filtro: <strong>${escapeHtml(filterLabel)}</strong> •
+                    Fornitore: <strong>${escapeHtml(suppFilterLabel)}</strong>
+                </div>
+            </div>
+            <div class="mpdf-meta" style="text-align:right;">
+                Prodotti: <strong>${filtered.length}</strong><br/>
+                Totale stimato: <strong>${totalMoney.toFixed(2)} CHF/€</strong>
+            </div>
+        </div>
+        ${groupsHtml}
+    `;
+
+    document.body.classList.add("printing-mobile-pdf");
+    overlay.classList.remove("hidden");
+}
+
+function closeMobilePdfModal() {
+    document.body.classList.remove("printing-mobile-pdf");
+    document.getElementById("modal-mobile-pdf")?.classList.add("hidden");
+}
+
+function printMobilePdfSheet() {
+    document.body.classList.add("printing-mobile-pdf");
+    window.print();
+}
+
+async function shareOrPrintMobilePdf() {
+    try {
+        if (navigator.share && currentMobilePdfUrl) {
+            const res = await fetch(currentMobilePdfUrl, { credentials: "same-origin" });
+            if (res.ok) {
+                const blob = await res.blob();
+                const file = new File([blob], currentMobilePdfFileName, { type: "application/pdf" });
+                if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+                    await navigator.share({
+                        files: [file],
+                        title: currentMobilePdfFileName,
+                    });
+                    return;
+                }
+            }
+        }
+    } catch (err) {
+        if (err && err.name === "AbortError") return;
+    }
+    // Se la condivisione file diretta non è attiva (es. connessione HTTP su iOS), apre il pannello nativo Stampa/Condividi PDF di iOS/Android
+    printMobilePdfSheet();
 }
 
 function downloadPurchasesPdf() {

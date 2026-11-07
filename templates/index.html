@@ -727,6 +727,31 @@
         </div>
     </div>
 
+    <!-- =================================================================== -->
+    <!-- MODALE ANTEPRIMA / STAMPA / CONDIVISIONE PDF SU SMARTPHONE          -->
+    <!-- =================================================================== -->
+    <div id="modal-mobile-pdf" class="mobile-pdf-overlay hidden">
+        <div class="mobile-pdf-topbar no-print">
+            <button type="button" class="btn btn-mobile-pdf-back" onclick="closeMobilePdfModal()">
+                ← Torna alla Lista
+            </button>
+            <div class="mobile-pdf-actions">
+                <button type="button" class="btn btn-mobile-pdf-share" onclick="shareOrPrintMobilePdf()">
+                    📤 Condividi / Salva
+                </button>
+                <button type="button" class="btn btn-mobile-pdf-print" onclick="printMobilePdfSheet()">
+                    🖨️ Stampa
+                </button>
+            </div>
+        </div>
+        <div class="mobile-pdf-hint no-print">
+            💡 Tocca <strong>🖨️ Stampa</strong> (o <strong>📤 Condividi / Salva</strong>) per stampare o inviare il PDF su WhatsApp / salvarlo nei File, oppure tocca <strong>← Torna alla Lista</strong> in alto a sinistra per uscire.
+        </div>
+        <div class="mobile-pdf-body">
+            <div id="mobile-pdf-sheet" class="mobile-pdf-sheet"></div>
+        </div>
+    </div>
+
     <script src="/static/js/app.js"></script>
 </body>
 </html>
