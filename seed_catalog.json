@@ -73,12 +73,17 @@
       "default_unit": "Pz"
     },
     {
-      "name": "Lamponi / Ribes",
+      "name": "Lamponi",
       "category": "FRUTTA",
       "default_unit": ""
     },
     {
-      "name": "Broccoli / Romanesco",
+      "name": "Ribes",
+      "category": "FRUTTA",
+      "default_unit": ""
+    },
+    {
+      "name": "Broccoli",
       "category": "VERDURA",
       "default_unit": "Pz"
     },
@@ -103,7 +108,12 @@
       "default_unit": "Pz"
     },
     {
-      "name": "Mirtilli / More",
+      "name": "Mirtilli",
+      "category": "FRUTTA",
+      "default_unit": ""
+    },
+    {
+      "name": "More",
       "category": "FRUTTA",
       "default_unit": ""
     },
@@ -348,7 +358,12 @@
       "default_unit": ""
     },
     {
-      "name": "Noci / Nocciole",
+      "name": "Noci",
+      "category": "ALIMENTARI",
+      "default_unit": ""
+    },
+    {
+      "name": "Nocciole",
       "category": "ALIMENTARI",
       "default_unit": ""
     },

@@ -395,6 +395,136 @@ function getSupplierPrice(productName, fornitore) {
     }
 })();
 
+// Divisione automatica prodotti multipli in righe separate e rinomina "Broccoli / Romanesco" -> "Broccoli"
+(function splitAndRenameCombinedProducts() {
+    try {
+        const ts = new Date().toISOString().slice(0, 19);
+
+        // 1. Rinomina "Broccoli / Romanesco" -> "Broccoli"
+        const oldBroccoli = "Broccoli / Romanesco";
+        const newBroccoli = "Broccoli";
+        const existingBroccoliCat = db.prepare("SELECT id FROM catalog_products WHERE LOWER(name) = LOWER(?)").get(newBroccoli);
+        const oldBroccoliCat = db.prepare("SELECT * FROM catalog_products WHERE LOWER(name) = LOWER(?)").get(oldBroccoli);
+        if (oldBroccoliCat) {
+            if (existingBroccoliCat && existingBroccoliCat.id !== oldBroccoliCat.id) {
+                db.prepare("UPDATE shopping_list_items SET product_id = ?, name = ? WHERE LOWER(name) = LOWER(?)").run(
+                    existingBroccoliCat.id,
+                    newBroccoli,
+                    oldBroccoli
+                );
+                db.prepare("DELETE FROM catalog_products WHERE id = ?").run(oldBroccoliCat.id);
+            } else {
+                db.prepare("UPDATE catalog_products SET name = ? WHERE id = ?").run(newBroccoli, oldBroccoliCat.id);
+            }
+        }
+        db.prepare("UPDATE shopping_list_items SET name = ? WHERE LOWER(name) = LOWER(?)").run(newBroccoli, oldBroccoli);
+        db.prepare("UPDATE acquisti SET descrizione_prodotto = ? WHERE LOWER(descrizione_prodotto) = LOWER(?)").run(newBroccoli, oldBroccoli);
+        const brocPrices = db.prepare("SELECT * FROM product_supplier_prices WHERE LOWER(product_name) = LOWER(?)").all(oldBroccoli);
+        for (const bp of brocPrices) {
+            saveSupplierPrice(newBroccoli, bp.fornitore, bp.unit_price);
+        }
+        db.prepare("DELETE FROM product_supplier_prices WHERE LOWER(product_name) = LOWER(?)").run(oldBroccoli);
+
+        // 2. Dividi in righe differenti:
+        //    - "Lamponi / Ribes" -> "Lamponi" e "Ribes" (FRUTTA)
+        //    - "Mirtilli / More" -> "Mirtilli" e "More" (FRUTTA)
+        //    - "Noci / Nocciole" -> "Noci" e "Nocciole" (ALIMENTARI)
+        const splits = [
+            { oldName: "Lamponi / Ribes", first: "Lamponi", second: "Ribes", defaultCat: "FRUTTA", defaultUnit: "" },
+            { oldName: "Mirtilli / More", first: "Mirtilli", second: "More", defaultCat: "FRUTTA", defaultUnit: "" },
+            { oldName: "Noci / Nocciole", first: "Noci", second: "Nocciole", defaultCat: "ALIMENTARI", defaultUnit: "" },
+        ];
+
+        for (const sp of splits) {
+            // Prezzi per fornitore
+            const oldPrices = db.prepare("SELECT * FROM product_supplier_prices WHERE LOWER(product_name) = LOWER(?)").all(sp.oldName);
+            for (const op of oldPrices) {
+                saveSupplierPrice(sp.first, op.fornitore, op.unit_price);
+                saveSupplierPrice(sp.second, op.fornitore, op.unit_price);
+            }
+            db.prepare("DELETE FROM product_supplier_prices WHERE LOWER(product_name) = LOWER(?)").run(sp.oldName);
+
+            // Catalogo: trasforma oldName in sp.first e assicurati che esista anche sp.second
+            const oldCatRow = db.prepare("SELECT * FROM catalog_products WHERE LOWER(name) = LOWER(?)").get(sp.oldName);
+            const catName = oldCatRow ? oldCatRow.category : sp.defaultCat;
+            const unitName = oldCatRow ? oldCatRow.default_unit : sp.defaultUnit;
+            const lastPrice = oldCatRow ? oldCatRow.last_unit_price || 0 : 0;
+            const lastForn = oldCatRow ? oldCatRow.last_fornitore || "Aldi" : "Aldi";
+
+            let firstProd = db.prepare("SELECT * FROM catalog_products WHERE LOWER(name) = LOWER(?)").get(sp.first);
+            if (oldCatRow) {
+                if (firstProd && firstProd.id !== oldCatRow.id) {
+                    db.prepare("UPDATE shopping_list_items SET product_id = ? WHERE product_id = ?").run(firstProd.id, oldCatRow.id);
+                    db.prepare("DELETE FROM catalog_products WHERE id = ?").run(oldCatRow.id);
+                } else {
+                    db.prepare("UPDATE catalog_products SET name = ? WHERE id = ?").run(sp.first, oldCatRow.id);
+                    firstProd = db.prepare("SELECT * FROM catalog_products WHERE id = ?").get(oldCatRow.id);
+                }
+            } else if (!firstProd) {
+                const info1 = db
+                    .prepare(
+                        "INSERT INTO catalog_products (name, category, default_unit, last_unit_price, last_fornitore, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+                    )
+                    .run(sp.first, catName, unitName, lastPrice, lastForn, ts);
+                firstProd = db.prepare("SELECT * FROM catalog_products WHERE id = ?").get(Number(info1.lastInsertRowid));
+            }
+
+            let secondProd = db.prepare("SELECT * FROM catalog_products WHERE LOWER(name) = LOWER(?)").get(sp.second);
+            if (!secondProd) {
+                const info2 = db
+                    .prepare(
+                        "INSERT INTO catalog_products (name, category, default_unit, last_unit_price, last_fornitore, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+                    )
+                    .run(sp.second, catName, unitName, lastPrice, lastForn, ts);
+                secondProd = db.prepare("SELECT * FROM catalog_products WHERE id = ?").get(Number(info2.lastInsertRowid));
+            }
+
+            // Nelle liste della spesa: rinomina oldName -> sp.first e aggiungi la riga separata sp.second in ogni lista
+            const listItemsWithOld = db.prepare("SELECT * FROM shopping_list_items WHERE LOWER(name) = LOWER(?)").all(sp.oldName);
+            for (const item of listItemsWithOld) {
+                db.prepare("UPDATE shopping_list_items SET product_id = ?, name = ? WHERE id = ?").run(
+                    firstProd ? firstProd.id : item.product_id,
+                    sp.first,
+                    item.id
+                );
+            }
+
+            // Assicura che in tutte le liste esistenti siano presenti sia sp.first che sp.second come righe distinte
+            const allLists = db.prepare("SELECT id, COALESCE(fornitore, 'Aldi') AS fornitore FROM shopping_lists").all();
+            for (const lst of allLists) {
+                const firstInList = db
+                    .prepare("SELECT * FROM shopping_list_items WHERE list_id = ? AND LOWER(name) = LOWER(?)")
+                    .get(lst.id, sp.first);
+                const secondInList = db
+                    .prepare("SELECT * FROM shopping_list_items WHERE list_id = ? AND LOWER(name) = LOWER(?)")
+                    .get(lst.id, sp.second);
+
+                const refForn = firstInList?.fornitore || lastForn || lst.fornitore || "Aldi";
+                const refUnit = firstInList?.unit ?? unitName ?? "";
+                const refCat = firstInList?.category || catName || sp.defaultCat;
+                const refPrice = firstInList?.unit_price || lastPrice || 0;
+
+                if (!firstInList && firstProd) {
+                    db.prepare(
+                        `INSERT INTO shopping_list_items
+                         (list_id, product_id, name, category, unit, quantity, unit_price, total_price, fornitore, in_list, purchased, notes, updated_at)
+                         VALUES (?, ?, ?, ?, ?, '', ?, 0, ?, 0, 0, '', ?)`
+                    ).run(lst.id, firstProd.id, sp.first, refCat, refUnit, refPrice, refForn, ts);
+                }
+                if (!secondInList && secondProd) {
+                    db.prepare(
+                        `INSERT INTO shopping_list_items
+                         (list_id, product_id, name, category, unit, quantity, unit_price, total_price, fornitore, in_list, purchased, notes, updated_at)
+                         VALUES (?, ?, ?, ?, ?, '', ?, 0, ?, 0, 0, '', ?)`
+                    ).run(lst.id, secondProd.id, sp.second, refCat, refUnit, refPrice, refForn, ts);
+                }
+            }
+        }
+    } catch (err) {
+        console.error("Errore split/rename prodotti:", err);
+    }
+})();
+
 function ensureSupplierExists(nome) {
     const clean = String(nome || "").trim();
     if (!clean) return "Aldi";
