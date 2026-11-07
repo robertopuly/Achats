@@ -939,6 +939,10 @@ const MIME_TYPES = {
     ".jpeg": "image/jpeg",
     ".gif": "image/gif",
     ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".avif": "image/avif",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
     ".svg": "image/svg+xml",
     ".ico": "image/x-icon",
     ".mp4": "video/mp4",
@@ -947,6 +951,92 @@ const MIME_TYPES = {
     ".webm": "video/webm",
     ".ogg": "video/ogg",
 };
+
+const SUPPORTED_MEDIA_EXTS = new Set([
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".bmp",
+    ".avif",
+    ".heic",
+    ".heif",
+    ".svg",
+    ".mp4",
+    ".m4v",
+    ".mov",
+    ".webm",
+    ".ogg",
+]);
+
+// Sincronizza automaticamente i file copiati manualmente nella cartella data/media_clips sul NAS Synology
+function syncMediaClipsDirectory() {
+    try {
+        if (!fs.existsSync(MEDIA_CLIPS_DIR)) {
+            fs.mkdirSync(MEDIA_CLIPS_DIR, { recursive: true });
+        }
+        const entries = fs.readdirSync(MEDIA_CLIPS_DIR, { withFileTypes: true });
+        const diskFiles = new Set();
+
+        const existingRows = db.prepare("SELECT id, file_name FROM media_clips").all();
+        const dbFileMap = new Map(existingRows.map((r) => [r.file_name, r.id]));
+
+        const ins = db.prepare(
+            `INSERT INTO media_clips (title, file_name, mime_type, media_kind, file_size, created_by, created_at)
+             VALUES (?, ?, ?, ?, ?, NULL, ?)`
+        );
+
+        for (const entry of entries) {
+            if (!entry.isFile()) continue;
+            const fileName = entry.name;
+            if (fileName.startsWith(".") || fileName.startsWith("@eaDir") || fileName.toLowerCase() === "thumbs.db") {
+                continue;
+            }
+            const ext = path.extname(fileName).toLowerCase();
+            if (!SUPPORTED_MEDIA_EXTS.has(ext)) continue;
+
+            diskFiles.add(fileName);
+            if (!dbFileMap.has(fileName)) {
+                const fullPath = path.join(MEDIA_CLIPS_DIR, fileName);
+                let fileSize = 0;
+                let mtimeIso = nowIso();
+                try {
+                    const st = fs.statSync(fullPath);
+                    fileSize = st.size || 0;
+                    if (st.mtime) {
+                        mtimeIso = st.mtime.toISOString().slice(0, 19);
+                    }
+                } catch (_) {}
+
+                const isVideo = [".mp4", ".m4v", ".mov", ".webm", ".ogg"].includes(ext);
+                const mediaKind = isVideo ? "video" : "image";
+                const mimeType = MIME_TYPES[ext] || (isVideo ? "video/mp4" : "image/jpeg");
+                const cleanTitle =
+                    path
+                        .basename(fileName, path.extname(fileName))
+                        .replace(/^clip_\d+_[a-f0-9]+$/i, "")
+                        .replace(/[_-]+/g, " ")
+                        .trim() || fileName;
+
+                ins.run(cleanTitle, fileName, mimeType, mediaKind, fileSize, mtimeIso);
+            }
+        }
+
+        // Rimuove dal DB eventuali record di file cancellati manualmente dalla cartella data/media_clips
+        const delClip = db.prepare("DELETE FROM media_clips WHERE id = ?");
+        const delDeliveries = db.prepare("DELETE FROM media_popup_deliveries WHERE clip_id = ?");
+        for (const row of existingRows) {
+            if (!diskFiles.has(row.file_name)) {
+                delDeliveries.run(row.id);
+                delClip.run(row.id);
+            }
+        }
+    } catch (err) {
+        console.error("Errore scansione cartella media_clips:", err);
+    }
+}
+syncMediaClipsDirectory();
 
 async function handleRequest(req, res) {
     try {
@@ -2229,6 +2319,7 @@ async function handleRequest(req, res) {
             if (!isRobertoUser(currentUser)) {
                 return sendJson(res, 403, { error: "Funzione riservata esclusivamente all'account di Roberto." });
             }
+            syncMediaClipsDirectory();
             const clips = db
                 .prepare("SELECT * FROM media_clips ORDER BY id DESC")
                 .all()
