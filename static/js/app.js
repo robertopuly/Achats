@@ -252,9 +252,12 @@ async function enterApp() {
     document.getElementById("current-user-name").textContent =
         state.user.display_name || state.user.username;
 
+    updateRobertoMediaButtonVisibility();
+
     await loadFornitoriList();
     await loadListsAndSelectLatest();
     await loadAcquistiDatabase();
+    await checkPendingMediaPopups();
     startRealtimeSync();
 }
 
@@ -2373,6 +2376,7 @@ function startRealtimeSync() {
             if (document.visibilityState === "visible" && state.user) {
                 try {
                     await loadListsAndSelectLatest();
+                    await checkPendingMediaPopups();
                 } catch (_) {}
             }
         });
@@ -2380,6 +2384,7 @@ function startRealtimeSync() {
             if (state.user) {
                 try {
                     await loadListsAndSelectLatest();
+                    await checkPendingMediaPopups();
                 } catch (_) {}
             }
         });
@@ -2394,6 +2399,9 @@ function startRealtimeSync() {
         try {
             if (state.activeSection === "list") {
                 const ver = await apiFetch(`/api/lists/${state.currentList.id}/version`);
+                if (Number(ver.pending_media_popups) > 0) {
+                    await checkPendingMediaPopups();
+                }
                 if (ver.deleted && ver.latest_list_id) {
                     await loadListsAndSelectLatest(ver.latest_list_id);
                     return;
@@ -2408,6 +2416,8 @@ function startRealtimeSync() {
                     await refreshListsSummaryOnly();
                     await refreshDbCounterBadge();
                 }
+            } else {
+                await checkPendingMediaPopups();
             }
         } catch (_) {}
     }, 3000);
@@ -2688,4 +2698,454 @@ function acknowledgeSameDayAlertModal(scrollToFirst = false) {
         }
     }
 }
+
+// ============================================================================
+// SISTEMA IMMAGINI & MINI CLIP POPUP (ESCLUSIVO ACCOUNT ROBERTO PER INVIO)
+// ============================================================================
+const mediaPopupState = {
+    clips: [],
+    users: [],
+    selectedClipIds: new Set(),
+    selectedRecipientIds: new Set(),
+    incomingQueue: [],
+    incomingIndex: 0,
+};
+
+function isCurrentUserRoberto() {
+    if (!state.user) return false;
+    if (state.user.is_roberto === true) return true;
+    const u = String(state.user.username || "").trim().toLowerCase();
+    const d = String(state.user.display_name || "").trim().toLowerCase();
+    return u === "roberto" || d === "roberto" || u.startsWith("roberto") || d.startsWith("roberto");
+}
+
+function updateRobertoMediaButtonVisibility() {
+    const btn = document.getElementById("btn-roberto-media-popup");
+    if (!btn) return;
+    if (isCurrentUserRoberto()) {
+        btn.classList.remove("hidden");
+    } else {
+        btn.classList.add("hidden");
+    }
+}
+
+async function openMediaPopupModal() {
+    if (!isCurrentUserRoberto()) {
+        showToast("Funzione riservata esclusivamente all'account di Roberto.");
+        return;
+    }
+    openModal("modal-media-popup-manager");
+    await loadMediaClipsAndUsers();
+}
+
+async function loadMediaClipsAndUsers() {
+    try {
+        const data = await apiFetch("/api/media-clips");
+        mediaPopupState.clips = data.clips || [];
+        mediaPopupState.users = data.users || [];
+
+        // Rimuovi eventuali ID non più esistenti
+        const validClipIds = new Set(mediaPopupState.clips.map((c) => Number(c.id)));
+        for (const cid of Array.from(mediaPopupState.selectedClipIds)) {
+            if (!validClipIds.has(cid)) mediaPopupState.selectedClipIds.delete(cid);
+        }
+
+        // Preseleziona di default gli altri account se non c'è ancora nessuna selezione
+        if (mediaPopupState.selectedRecipientIds.size === 0) {
+            for (const u of mediaPopupState.users) {
+                if (Number(u.id) !== Number(state.user?.id)) {
+                    mediaPopupState.selectedRecipientIds.add(Number(u.id));
+                }
+            }
+        }
+
+        renderMediaClipsGrid();
+        renderMediaRecipientsList();
+    } catch (err) {
+        showToast(err.message);
+    }
+}
+
+function renderMediaClipsGrid() {
+    const grid = document.getElementById("media-clips-grid");
+    const countEl = document.getElementById("media-selected-count");
+    if (!grid) return;
+
+    if (countEl) {
+        countEl.textContent = String(mediaPopupState.selectedClipIds.size);
+    }
+
+    if (mediaPopupState.clips.length === 0) {
+        grid.innerHTML = `
+            <div style="grid-column: 1 / -1; text-align:center; padding:22px 12px; color:#64748b; font-size:0.86rem;">
+                Nessuna immagine o mini clip ancora caricata.<br/>
+                Usa il pulsante <strong>⬆️ Carica</strong> qui sopra per aggiungere foto, GIF o mini video dal telefono o dal PC!
+            </div>
+        `;
+        return;
+    }
+
+    grid.innerHTML = "";
+    for (const clip of mediaPopupState.clips) {
+        const cid = Number(clip.id);
+        const isSelected = mediaPopupState.selectedClipIds.has(cid);
+        const isVideo = clip.media_kind === "video";
+
+        const card = document.createElement("div");
+        card.className = `media-clip-card ${isSelected ? "is-selected" : ""}`;
+        card.onclick = () => toggleSelectMediaClip(cid);
+
+        const mediaHtml = isVideo
+            ? `<video src="${escapeHtmlAttr(clip.url)}" muted playsinline preload="metadata"></video>`
+            : `<img src="${escapeHtmlAttr(clip.url)}" alt="${escapeHtmlAttr(clip.title)}" loading="lazy" />`;
+
+        card.innerHTML = `
+            <div class="media-clip-thumb-wrap">
+                <div class="media-clip-check">${isSelected ? "✓" : ""}</div>
+                ${mediaHtml}
+                <span class="media-clip-kind-badge">${isVideo ? "🎬 Clip" : "🖼️ Foto"}</span>
+                <button type="button" class="media-clip-delete-btn" title="Elimina dalla libreria">🗑</button>
+            </div>
+            <div class="media-clip-info" title="${escapeHtmlAttr(clip.title)}">
+                ${escapeHtml(clip.title)}
+            </div>
+        `;
+
+        const delBtn = card.querySelector(".media-clip-delete-btn");
+        if (delBtn) {
+            delBtn.addEventListener("click", (ev) => {
+                ev.stopPropagation();
+                deleteMediaClipItem(cid, clip.title);
+            });
+        }
+
+        // Hover / touch preview for video thumbnails
+        const vidEl = card.querySelector("video");
+        if (vidEl) {
+            card.addEventListener("mouseenter", () => {
+                vidEl.play().catch(() => {});
+            });
+            card.addEventListener("mouseleave", () => {
+                vidEl.pause();
+                vidEl.currentTime = 0;
+            });
+        }
+
+        grid.appendChild(card);
+    }
+}
+
+function toggleSelectMediaClip(clipId) {
+    const cid = Number(clipId);
+    if (mediaPopupState.selectedClipIds.has(cid)) {
+        mediaPopupState.selectedClipIds.delete(cid);
+    } else {
+        mediaPopupState.selectedClipIds.add(cid);
+    }
+    renderMediaClipsGrid();
+}
+
+function selectAllMediaClips(selectAll = true) {
+    mediaPopupState.selectedClipIds.clear();
+    if (selectAll) {
+        for (const c of mediaPopupState.clips) {
+            mediaPopupState.selectedClipIds.add(Number(c.id));
+        }
+    }
+    renderMediaClipsGrid();
+}
+
+async function handleUploadMediaClips() {
+    const fileInput = document.getElementById("media-upload-input");
+    const titleInput = document.getElementById("media-upload-title");
+    const uploadBtn = document.getElementById("btn-upload-media-clip");
+
+    const files = fileInput?.files ? Array.from(fileInput.files) : [];
+    if (files.length === 0) {
+        showToast("Scegli prima una o più immagini o mini clip da caricare!");
+        return;
+    }
+
+    const customTitle = (titleInput?.value || "").trim();
+    if (uploadBtn) {
+        uploadBtn.disabled = true;
+        uploadBtn.textContent = "⏳ Caricamento...";
+    }
+
+    try {
+        let uploadedCount = 0;
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            const perFileTitle =
+                customTitle && files.length > 1 ? `${customTitle} (${i + 1})` : customTitle;
+
+            const res = await fetch("/api/media-clips/upload", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {
+                    "Content-Type": file.type || "application/octet-stream",
+                    "X-Mime-Type": file.type || "application/octet-stream",
+                    "X-File-Name": encodeURIComponent(file.name || "clip"),
+                    "X-Clip-Title": encodeURIComponent(perFileTitle),
+                },
+                body: file,
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(data.error || "Errore durante il caricamento del file");
+            }
+            if (data.clips) {
+                mediaPopupState.clips = data.clips;
+            }
+            if (data.uploaded_id) {
+                mediaPopupState.selectedClipIds.add(Number(data.uploaded_id));
+            }
+            uploadedCount++;
+        }
+
+        if (fileInput) fileInput.value = "";
+        if (titleInput) titleInput.value = "";
+        renderMediaClipsGrid();
+        showToast(
+            uploadedCount === 1
+                ? "File caricato e selezionato nella libreria!"
+                : `${uploadedCount} file caricati e selezionati nella libreria!`,
+            "success"
+        );
+    } catch (err) {
+        showToast(err.message);
+    } finally {
+        if (uploadBtn) {
+            uploadBtn.disabled = false;
+            uploadBtn.textContent = "⬆️ Carica";
+        }
+    }
+}
+
+async function deleteMediaClipItem(clipId, title = "") {
+    if (!confirm(`Vuoi eliminare "${title || "questa clip"}" dalla libreria?`)) return;
+    try {
+        const data = await apiFetch(`/api/media-clips/${clipId}`, { method: "DELETE" });
+        mediaPopupState.selectedClipIds.delete(Number(clipId));
+        mediaPopupState.clips = data.clips || [];
+        renderMediaClipsGrid();
+        showToast("Elemento rimosso dalla libreria.");
+    } catch (err) {
+        showToast(err.message);
+    }
+}
+
+function renderMediaRecipientsList() {
+    const container = document.getElementById("media-recipients-list");
+    if (!container) return;
+    container.innerHTML = "";
+
+    for (const u of mediaPopupState.users) {
+        const uid = Number(u.id);
+        const isMe = state.user && Number(state.user.id) === uid;
+        const checked = mediaPopupState.selectedRecipientIds.has(uid);
+
+        const label = document.createElement("label");
+        label.className = `media-recipient-chip ${checked ? "is-checked" : ""}`;
+        label.innerHTML = `
+            <input type="checkbox" ${checked ? "checked" : ""} />
+            <span>👤 ${escapeHtml(u.display_name || u.username)}</span>
+            <small style="opacity:0.75;">(${escapeHtml(u.username)}${isMe ? " • Tu" : ""})</small>
+        `;
+        const cb = label.querySelector("input");
+        cb.addEventListener("change", () => {
+            if (cb.checked) {
+                mediaPopupState.selectedRecipientIds.add(uid);
+            } else {
+                mediaPopupState.selectedRecipientIds.delete(uid);
+            }
+            renderMediaRecipientsList();
+        });
+        container.appendChild(label);
+    }
+}
+
+function selectAllMediaRecipients(includeSelf = false) {
+    mediaPopupState.selectedRecipientIds.clear();
+    for (const u of mediaPopupState.users) {
+        const uid = Number(u.id);
+        const isMe = state.user && Number(state.user.id) === uid;
+        if (!isMe || includeSelf) {
+            mediaPopupState.selectedRecipientIds.add(uid);
+        }
+    }
+    renderMediaRecipientsList();
+}
+
+async function sendSelectedMediaPopups() {
+    const clipIds = Array.from(mediaPopupState.selectedClipIds);
+    const recipientIds = Array.from(mediaPopupState.selectedRecipientIds);
+    const customMsgInput = document.getElementById("media-popup-custom-message");
+    const customMessage = (customMsgInput?.value || "").trim();
+
+    if (clipIds.length === 0) {
+        showToast("Seleziona almeno un'immagine o mini clip dalla galleria (punto 2)!");
+        return;
+    }
+    if (recipientIds.length === 0) {
+        showToast("Seleziona almeno un account destinatario (punto 3)!");
+        return;
+    }
+
+    try {
+        const res = await apiFetch("/api/media-popups/send", {
+            method: "POST",
+            body: JSON.stringify({
+                clip_ids: clipIds,
+                recipient_user_ids: recipientIds,
+                custom_message: customMessage,
+            }),
+        });
+
+        if (customMsgInput) customMsgInput.value = "";
+        closeModal("modal-media-popup-manager");
+        showToast(
+            `🚀 Popup inviato con successo (${res.clips_count} clip a ${res.recipients_count} account)!`,
+            "success"
+        );
+
+        // Se Roberto ha selezionato anche se stesso per testare, mostra subito il popup
+        if (state.user && recipientIds.includes(Number(state.user.id))) {
+            await checkPendingMediaPopups();
+        }
+    } catch (err) {
+        showToast(err.message);
+    }
+}
+
+async function checkPendingMediaPopups() {
+    if (!state.user) return;
+    try {
+        const data = await apiFetch("/api/media-popups/pending");
+        const popups = data.popups || [];
+        if (popups.length === 0) return;
+
+        const existingIds = new Set(mediaPopupState.incomingQueue.map((p) => Number(p.delivery_id)));
+        const hasNew = popups.some((p) => !existingIds.has(Number(p.delivery_id)));
+
+        mediaPopupState.incomingQueue = popups;
+        if (mediaPopupState.incomingIndex >= popups.length) {
+            mediaPopupState.incomingIndex = 0;
+        }
+
+        const modalEl = document.getElementById("modal-incoming-media-popup");
+        const isAlreadyOpen = modalEl && !modalEl.classList.contains("hidden");
+
+        if (!isAlreadyOpen || hasNew) {
+            if (!isAlreadyOpen) {
+                mediaPopupState.incomingIndex = 0;
+            }
+            renderCurrentIncomingMediaPopup();
+            openModal("modal-incoming-media-popup");
+            playAlertNotificationSound();
+        }
+    } catch (_) {}
+}
+
+function renderCurrentIncomingMediaPopup() {
+    const queue = mediaPopupState.incomingQueue || [];
+    if (queue.length === 0) return;
+
+    const idx = Math.max(0, Math.min(mediaPopupState.incomingIndex, queue.length - 1));
+    mediaPopupState.incomingIndex = idx;
+    const item = queue[idx];
+
+    const senderTitle = document.getElementById("incoming-media-sender-title");
+    const counterEl = document.getElementById("incoming-media-counter");
+    const customMsgEl = document.getElementById("incoming-media-custom-msg");
+    const clipTitleEl = document.getElementById("incoming-media-clip-title");
+    const stageEl = document.getElementById("incoming-media-stage");
+    const navEl = document.getElementById("incoming-media-nav");
+
+    if (senderTitle) {
+        senderTitle.textContent = `🎬 Popup da ${item.sender_name || "Roberto"}!`;
+    }
+    if (counterEl) {
+        counterEl.textContent = `${idx + 1} / ${queue.length}`;
+    }
+    if (customMsgEl) {
+        if (item.custom_message) {
+            customMsgEl.textContent = `💬 "${item.custom_message}"`;
+            customMsgEl.classList.remove("hidden");
+        } else {
+            customMsgEl.textContent = "";
+            customMsgEl.classList.add("hidden");
+        }
+    }
+    if (clipTitleEl) {
+        clipTitleEl.textContent = item.title || "";
+    }
+    if (navEl) {
+        navEl.classList.toggle("hidden", queue.length <= 1);
+    }
+
+    if (stageEl) {
+        stageEl.innerHTML = "";
+        if (item.media_kind === "video") {
+            const vid = document.createElement("video");
+            vid.src = item.url;
+            vid.controls = true;
+            vid.autoplay = true;
+            vid.loop = true;
+            vid.playsInline = true;
+            vid.setAttribute("playsinline", "true");
+            stageEl.appendChild(vid);
+
+            // Tenta riproduzione con audio; se iOS/browser richiede muto per l'autoplay, avvia in muto e mostra pulsante "🔊 Attiva Audio"
+            vid.play().catch(() => {
+                vid.muted = true;
+                vid.play().catch(() => {});
+                const unmuteBtn = document.createElement("button");
+                unmuteBtn.type = "button";
+                unmuteBtn.className = "incoming-media-unmute-btn";
+                unmuteBtn.textContent = "🔊 Attiva Audio";
+                unmuteBtn.onclick = () => {
+                    vid.muted = false;
+                    vid.play().catch(() => {});
+                    unmuteBtn.remove();
+                };
+                stageEl.appendChild(unmuteBtn);
+            });
+        } else {
+            const img = document.createElement("img");
+            img.src = item.url;
+            img.alt = item.title || "Immagine Popup";
+            stageEl.appendChild(img);
+        }
+    }
+}
+
+function stepIncomingMediaPopup(delta) {
+    const queue = mediaPopupState.incomingQueue || [];
+    if (queue.length <= 1) return;
+    mediaPopupState.incomingIndex =
+        (mediaPopupState.incomingIndex + delta + queue.length) % queue.length;
+    renderCurrentIncomingMediaPopup();
+}
+
+async function acknowledgeIncomingMediaPopup() {
+    const stageEl = document.getElementById("incoming-media-stage");
+    if (stageEl) {
+        const vid = stageEl.querySelector("video");
+        if (vid) vid.pause();
+        stageEl.innerHTML = "";
+    }
+    const deliveryIds = (mediaPopupState.incomingQueue || []).map((p) => Number(p.delivery_id));
+    mediaPopupState.incomingQueue = [];
+    mediaPopupState.incomingIndex = 0;
+    closeModal("modal-incoming-media-popup");
+
+    try {
+        await apiFetch("/api/media-popups/ack", {
+            method: "POST",
+            body: JSON.stringify({ delivery_ids: deliveryIds }),
+        });
+    } catch (_) {}
+}
+
 

@@ -99,6 +99,9 @@
                 </div>
 
                 <div class="header-actions">
+                    <button type="button" id="btn-roberto-media-popup" class="btn btn-media-popup btn-sm hidden" onclick="openMediaPopupModal()" title="Carica e invia immagini o mini clip popup agli altri account">
+                        🎬 <span>Clip Popup</span>
+                    </button>
                     <button type="button" class="btn btn-ghost btn-sm pc-only" onclick="openUsersModal()" title="Crea e gestisci gli account utenti (es. Cucina)">
                         👥 <span class="hide-xs">Utenti</span>
                     </button>
@@ -746,6 +749,111 @@
         </div>
         <div class="mobile-pdf-body">
             <div id="mobile-pdf-sheet" class="mobile-pdf-sheet"></div>
+        </div>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- MODALE ESCLUSIVA ROBERTO: GESTIONE & INVIO IMMAGINI / MINI CLIP     -->
+    <!-- =================================================================== -->
+    <div id="modal-media-popup-manager" class="modal-backdrop hidden" onclick="closeModalOnBackdrop(event, 'modal-media-popup-manager')">
+        <div class="modal-card modal-lg media-popup-manager-card" onclick="event.stopPropagation()">
+            <div class="modal-header media-popup-manager-header">
+                <h2>🎬 Invia Immagini o Mini Clip Popup</h2>
+                <button type="button" class="modal-close" onclick="closeModal('modal-media-popup-manager')">✕</button>
+            </div>
+            <div class="modal-body media-popup-manager-body">
+                <!-- BOX 1: CARICA NUOVE IMMAGINI O MINI CLIP -->
+                <div class="media-upload-box">
+                    <div class="media-section-title">
+                        <span>📤 1. Carica nuove Immagini o Mini Clip (Foto, GIF, Video MP4/MOV)</span>
+                    </div>
+                    <div class="media-upload-controls">
+                        <input
+                            type="file"
+                            id="media-upload-input"
+                            accept="image/*,video/*"
+                            multiple
+                            class="media-file-input"
+                        />
+                        <input
+                            type="text"
+                            id="media-upload-title"
+                            placeholder="Titolo opzionale (es. Attenzione, Buongiorno...)"
+                            class="media-title-input"
+                        />
+                        <button type="button" id="btn-upload-media-clip" class="btn btn-primary" onclick="handleUploadMediaClips()">
+                            ⬆️ Carica
+                        </button>
+                    </div>
+                </div>
+
+                <!-- BOX 2: GALLERIA SELEZIONABILE -->
+                <div class="media-gallery-box">
+                    <div class="media-section-header">
+                        <span class="media-section-title">🖼️ 2. Seleziona 1 o più Immagini / Mini Clip da inviare (<strong id="media-selected-count">0</strong> selezionati)</span>
+                        <div class="media-quick-btns">
+                            <button type="button" class="btn btn-secondary btn-xs" onclick="selectAllMediaClips(true)">Seleziona tutti</button>
+                            <button type="button" class="btn btn-secondary btn-xs" onclick="selectAllMediaClips(false)">Deseleziona</button>
+                        </div>
+                    </div>
+                    <div id="media-clips-grid" class="media-clips-grid"></div>
+                </div>
+
+                <!-- BOX 3: SCELTA DESTINATARI (1 O PIÙ ACCOUNT) + MESSAGGIO OPZIONALE -->
+                <div class="media-recipients-box">
+                    <div class="media-section-header">
+                        <span class="media-section-title">👥 3. Scegli a quali account inviare il Popup (1 o più di uno)</span>
+                        <div class="media-quick-btns">
+                            <button type="button" class="btn btn-secondary btn-xs" onclick="selectAllMediaRecipients(false)">Tutti gli altri</button>
+                            <button type="button" class="btn btn-secondary btn-xs" onclick="selectAllMediaRecipients(true)">Tutti (incluso me)</button>
+                        </div>
+                    </div>
+                    <div id="media-recipients-list" class="media-recipients-list"></div>
+
+                    <div class="form-group" style="margin-top:10px; margin-bottom:0;">
+                        <label for="media-popup-custom-message">💬 Messaggio o didascalia opzionale da mostrare nel popup:</label>
+                        <input
+                            type="text"
+                            id="media-popup-custom-message"
+                            placeholder="Scrivi un messaggio opzionale (es. Guarda questo! 😂)..."
+                        />
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('modal-media-popup-manager')">
+                    Chiudi
+                </button>
+                <button type="button" id="btn-send-media-popup" class="btn btn-media-send" onclick="sendSelectedMediaPopups()">
+                    🚀 Invia Popup Selezionati
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- MODALE POPUP RICEVUTO DAGLI ACCOUNT DESTINATARI (FOTO / MINI CLIP)  -->
+    <!-- =================================================================== -->
+    <div id="modal-incoming-media-popup" class="modal-backdrop incoming-media-backdrop hidden">
+        <div class="modal-card incoming-media-card" onclick="event.stopPropagation()">
+            <div class="modal-header incoming-media-header">
+                <h2 id="incoming-media-sender-title">🎬 Messaggio da Roberto!</h2>
+                <span id="incoming-media-counter" class="incoming-media-counter">1 / 1</span>
+            </div>
+            <div class="modal-body incoming-media-body">
+                <div id="incoming-media-custom-msg" class="incoming-media-custom-msg hidden"></div>
+                <div id="incoming-media-clip-title" class="incoming-media-clip-title"></div>
+                <div id="incoming-media-stage" class="incoming-media-stage"></div>
+            </div>
+            <div class="modal-footer incoming-media-footer">
+                <div id="incoming-media-nav" class="incoming-media-nav hidden">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="stepIncomingMediaPopup(-1)">⬅ Prec.</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="stepIncomingMediaPopup(1)">Succ. ➡</button>
+                </div>
+                <button type="button" class="btn btn-primary btn-lg" style="flex:1;" onclick="acknowledgeIncomingMediaPopup()">
+                    ✅ Chiudi Popup
+                </button>
+            </div>
         </div>
     </div>
 

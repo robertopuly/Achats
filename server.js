@@ -27,6 +27,12 @@ const db = new DatabaseSync(DB_PATH);
 db.exec("PRAGMA journal_mode = WAL;");
 db.exec("PRAGMA foreign_keys = ON;");
 
+// Cartella persistente per immagini e mini clip caricati da Roberto (dentro la stessa cartella di DB_PATH così su NAS Synology resta in /app/data/media_clips)
+const MEDIA_CLIPS_DIR = path.join(path.dirname(DB_PATH), "media_clips");
+if (!fs.existsSync(MEDIA_CLIPS_DIR)) {
+    fs.mkdirSync(MEDIA_CLIPS_DIR, { recursive: true });
+}
+
 // 1. Tabelle base (Utenti, Sessioni, Categorie, Catalogo, Liste della Spesa)
 db.exec(`
     CREATE TABLE IF NOT EXISTS users (
@@ -175,6 +181,30 @@ db.exec(`
         updated_at TEXT NOT NULL,
         PRIMARY KEY (product_name, fornitore)
     );
+
+    CREATE TABLE IF NOT EXISTS media_clips (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        file_name TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        media_kind TEXT NOT NULL DEFAULT 'image',
+        file_size INTEGER DEFAULT 0,
+        created_by INTEGER,
+        created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS media_popup_deliveries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        clip_id INTEGER NOT NULL,
+        sender_id INTEGER NOT NULL,
+        sender_name TEXT NOT NULL,
+        recipient_user_id INTEGER NOT NULL,
+        custom_message TEXT DEFAULT '',
+        seen INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (clip_id) REFERENCES media_clips(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_media_popup_recipient ON media_popup_deliveries(recipient_user_id, seen);
 `);
 
 function saveSupplierPrice(productName, fornitore, unitPrice) {
@@ -831,6 +861,40 @@ function readJsonBody(req) {
     });
 }
 
+function readRawBody(req, maxBytes = 65 * 1024 * 1024) {
+    return new Promise((resolve, reject) => {
+        const chunks = [];
+        let total = 0;
+        req.on("data", (chunk) => {
+            total += chunk.length;
+            if (total > maxBytes) {
+                reject(new Error("File troppo grande (massimo 60 MB)."));
+                req.destroy();
+                return;
+            }
+            chunks.push(chunk);
+        });
+        req.on("end", () => resolve(Buffer.concat(chunks)));
+        req.on("error", (err) => reject(err));
+    });
+}
+
+function isRobertoUser(user) {
+    if (!user) return false;
+    const u = String(user.username || "").trim().toLowerCase();
+    const d = String(user.display_name || "").trim().toLowerCase();
+    if (u === "roberto" || d === "roberto" || u.startsWith("roberto") || d.startsWith("roberto")) {
+        return true;
+    }
+    if (Number(user.id) === 1) {
+        const explicitRoberto = db
+            .prepare("SELECT id FROM users WHERE LOWER(username) LIKE 'roberto%' OR LOWER(display_name) LIKE 'roberto%' LIMIT 1")
+            .get();
+        return !explicitRoberto || Number(explicitRoberto.id) === 1;
+    }
+    return false;
+}
+
 function getFornitoriList() {
     return db.prepare("SELECT id, nome, sort_order FROM fornitori ORDER BY sort_order ASC, nome COLLATE NOCASE ASC").all();
 }
@@ -871,8 +935,17 @@ const MIME_TYPES = {
     ".js": "application/javascript; charset=utf-8",
     ".json": "application/json; charset=utf-8",
     ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
     ".svg": "image/svg+xml",
     ".ico": "image/x-icon",
+    ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+    ".ogg": "video/ogg",
 };
 
 async function handleRequest(req, res) {
@@ -909,6 +982,45 @@ async function handleRequest(req, res) {
             return res.end(fs.readFileSync(safePath));
         }
 
+        // Streaming file multimediali (immagini e mini clip popup) con supporto Range per iOS/Safari video
+        if (method === "GET" && pathname.startsWith("/api/media-clips/file/")) {
+            const rawName = decodeURIComponent(pathname.replace(/^\/api\/media-clips\/file\//, ""));
+            const safeFileName = path.basename(rawName);
+            const filePath = path.join(MEDIA_CLIPS_DIR, safeFileName);
+            if (!safeFileName || !filePath.startsWith(MEDIA_CLIPS_DIR) || !fs.existsSync(filePath)) {
+                res.writeHead(404);
+                return res.end("File multimediale non trovato");
+            }
+            const stat = fs.statSync(filePath);
+            const ext = path.extname(safeFileName).toLowerCase();
+            const clipRow = db.prepare("SELECT mime_type FROM media_clips WHERE file_name = ? LIMIT 1").get(safeFileName);
+            const contentType = (clipRow && clipRow.mime_type) || MIME_TYPES[ext] || "application/octet-stream";
+            const range = req.headers.range;
+
+            if (range) {
+                const parts = range.replace(/bytes=/, "").split("-");
+                const start = parseInt(parts[0], 10) || 0;
+                const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
+                const chunkSize = Math.max(0, end - start + 1);
+                res.writeHead(206, {
+                    "Content-Range": `bytes ${start}-${end}/${stat.size}`,
+                    "Accept-Ranges": "bytes",
+                    "Content-Length": chunkSize,
+                    "Content-Type": contentType,
+                    "Cache-Control": "public, max-age=86400",
+                });
+                return fs.createReadStream(filePath, { start, end }).pipe(res);
+            }
+
+            res.writeHead(200, {
+                "Content-Length": stat.size,
+                "Accept-Ranges": "bytes",
+                "Content-Type": contentType,
+                "Cache-Control": "public, max-age=86400",
+            });
+            return fs.createReadStream(filePath).pipe(res);
+        }
+
         // 2. API AUTH
         if (pathname === "/api/auth/me" && method === "GET") {
             const lanIp = getLanIp(hostHeader);
@@ -920,7 +1032,7 @@ async function handleRequest(req, res) {
             }
             return sendJson(res, 200, {
                 authenticated: true,
-                user,
+                user: { ...user, is_roberto: isRobertoUser(user) },
                 server_url: serverUrl,
                 lan_ip: lanIp,
             });
@@ -958,6 +1070,7 @@ async function handleRequest(req, res) {
                 .prepare("INSERT INTO users (username, display_name, password_hash, created_at) VALUES (?, ?, ?, ?)")
                 .run(username, display_name, pwHash, ts);
             const userId = Number(info.lastInsertRowid);
+            const newUserObj = { id: userId, username, display_name };
 
             const cookie = createSessionCookie(userId);
             return sendJson(
@@ -965,7 +1078,7 @@ async function handleRequest(req, res) {
                 200,
                 {
                     authenticated: true,
-                    user: { id: userId, username, display_name },
+                    user: { ...newUserObj, is_roberto: isRobertoUser(newUserObj) },
                 },
                 { "Set-Cookie": cookie }
             );
@@ -984,13 +1097,14 @@ async function handleRequest(req, res) {
                 return sendJson(res, 401, { error: "Credenziali non valide. Verifica nome utente e password." });
             }
 
+            const userObj = { id: user.id, username: user.username, display_name: user.display_name };
             const cookie = createSessionCookie(user.id);
             return sendJson(
                 res,
                 200,
                 {
                     authenticated: true,
-                    user: { id: user.id, username: user.username, display_name: user.display_name },
+                    user: { ...userObj, is_roberto: isRobertoUser(userObj) },
                 },
                 { "Set-Cookie": cookie }
             );
@@ -1324,17 +1438,22 @@ async function handleRequest(req, res) {
             const latest = db
                 .prepare("SELECT id, list_date FROM shopping_lists ORDER BY list_date DESC, id DESC LIMIT 1")
                 .get();
+            const pendingMediaCount = db
+                .prepare("SELECT COUNT(*) AS c FROM media_popup_deliveries WHERE recipient_user_id = ? AND seen = 0")
+                .get(Number(currentUser.id || 0)).c;
             if (!row) {
                 return sendJson(res, 200, {
                     deleted: true,
                     latest_list_id: latest ? latest.id : null,
                     latest_list_date: latest ? latest.list_date : null,
+                    pending_media_popups: pendingMediaCount,
                 });
             }
             return sendJson(res, 200, {
                 ...row,
                 latest_list_id: latest ? latest.id : row.id,
                 latest_list_date: latest ? latest.list_date : row.list_date,
+                pending_media_popups: pendingMediaCount,
             });
         }
 
@@ -2101,6 +2220,199 @@ async function handleRequest(req, res) {
                 db.prepare("DELETE FROM acquisti WHERE id = ?").run(acqId);
                 return sendJson(res, 200, { deleted: true, id: acqId });
             }
+        }
+
+        // =====================================================================
+        // 7. LIBRERIA IMMAGINI & MINI CLIP POPUP (SOLO ACCOUNT ROBERTO PER GESTIONE/INVIO)
+        // =====================================================================
+        if (pathname === "/api/media-clips" && method === "GET") {
+            if (!isRobertoUser(currentUser)) {
+                return sendJson(res, 403, { error: "Funzione riservata esclusivamente all'account di Roberto." });
+            }
+            const clips = db
+                .prepare("SELECT * FROM media_clips ORDER BY id DESC")
+                .all()
+                .map((c) => ({
+                    ...c,
+                    url: `/api/media-clips/file/${encodeURIComponent(c.file_name)}`,
+                }));
+            const users = db
+                .prepare("SELECT id, username, display_name FROM users ORDER BY id ASC")
+                .all();
+            return sendJson(res, 200, { clips, users });
+        }
+
+        if (pathname === "/api/media-clips/upload" && method === "POST") {
+            if (!isRobertoUser(currentUser)) {
+                return sendJson(res, 403, { error: "Caricamento riservato esclusivamente all'account di Roberto." });
+            }
+            const rawBuffer = await readRawBody(req);
+            if (!rawBuffer || rawBuffer.length === 0) {
+                return sendJson(res, 400, { error: "Nessun file ricevuto." });
+            }
+
+            const origName = decodeURIComponent(String(req.headers["x-file-name"] || "clip.jpg"));
+            const rawTitle = decodeURIComponent(String(req.headers["x-clip-title"] || "")).trim();
+            const rawMime = String(req.headers["x-mime-type"] || req.headers["content-type"] || "").toLowerCase();
+
+            let ext = path.extname(origName).toLowerCase().replace(/[^a-z0-9.]/g, "");
+            if (!ext) {
+                if (rawMime.includes("mp4")) ext = ".mp4";
+                else if (rawMime.includes("quicktime") || rawMime.includes("mov")) ext = ".mov";
+                else if (rawMime.includes("webm")) ext = ".webm";
+                else if (rawMime.includes("gif")) ext = ".gif";
+                else if (rawMime.includes("png")) ext = ".png";
+                else if (rawMime.includes("webp")) ext = ".webp";
+                else ext = ".jpg";
+            }
+
+            const isVideoExt = [".mp4", ".mov", ".webm", ".m4v", ".ogg"].includes(ext);
+            const mediaKind = rawMime.startsWith("video/") || isVideoExt ? "video" : "image";
+            const mimeType =
+                rawMime && rawMime !== "application/octet-stream"
+                    ? rawMime
+                    : MIME_TYPES[ext] || (mediaKind === "video" ? "video/mp4" : "image/jpeg");
+
+            const baseTitle =
+                rawTitle ||
+                path
+                    .basename(origName, path.extname(origName))
+                    .replace(/[_-]+/g, " ")
+                    .trim() ||
+                (mediaKind === "video" ? "Mini Clip" : "Immagine");
+
+            const safeFileName = `clip_${Date.now()}_${crypto.randomBytes(4).toString("hex")}${ext}`;
+            const targetPath = path.join(MEDIA_CLIPS_DIR, safeFileName);
+            fs.writeFileSync(targetPath, rawBuffer);
+
+            const ts = nowIso();
+            const info = db
+                .prepare(
+                    `INSERT INTO media_clips (title, file_name, mime_type, media_kind, file_size, created_by, created_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)`
+                )
+                .run(baseTitle, safeFileName, mimeType, mediaKind, rawBuffer.length, currentUser.id, ts);
+
+            const createdId = Number(info.lastInsertRowid);
+            const clips = db
+                .prepare("SELECT * FROM media_clips ORDER BY id DESC")
+                .all()
+                .map((c) => ({
+                    ...c,
+                    url: `/api/media-clips/file/${encodeURIComponent(c.file_name)}`,
+                }));
+
+            return sendJson(res, 200, { uploaded_id: createdId, clips });
+        }
+
+        const singleClipMatch = pathname.match(/^\/api\/media-clips\/(\d+)$/);
+        if (singleClipMatch && method === "DELETE") {
+            if (!isRobertoUser(currentUser)) {
+                return sendJson(res, 403, { error: "Operazione riservata esclusivamente all'account di Roberto." });
+            }
+            const clipId = Number(singleClipMatch[1]);
+            const clip = db.prepare("SELECT * FROM media_clips WHERE id = ?").get(clipId);
+            if (!clip) {
+                return sendJson(res, 404, { error: "File multimediale non trovato." });
+            }
+            const filePath = path.join(MEDIA_CLIPS_DIR, path.basename(clip.file_name));
+            if (fs.existsSync(filePath)) {
+                try {
+                    fs.unlinkSync(filePath);
+                } catch (_) {}
+            }
+            db.prepare("DELETE FROM media_popup_deliveries WHERE clip_id = ?").run(clipId);
+            db.prepare("DELETE FROM media_clips WHERE id = ?").run(clipId);
+
+            const clips = db
+                .prepare("SELECT * FROM media_clips ORDER BY id DESC")
+                .all()
+                .map((c) => ({
+                    ...c,
+                    url: `/api/media-clips/file/${encodeURIComponent(c.file_name)}`,
+                }));
+            return sendJson(res, 200, { deleted: true, clips });
+        }
+
+        if (pathname === "/api/media-popups/send" && method === "POST") {
+            if (!isRobertoUser(currentUser)) {
+                return sendJson(res, 403, { error: "Invio popup riservato esclusivamente all'account di Roberto." });
+            }
+            const data = await readJsonBody(req);
+            const clipIds = Array.isArray(data.clip_ids)
+                ? data.clip_ids.map((n) => Number(n)).filter((n) => n > 0)
+                : [];
+            const recipientIds = Array.isArray(data.recipient_user_ids)
+                ? data.recipient_user_ids.map((n) => Number(n)).filter((n) => n > 0)
+                : [];
+            const customMessage = String(data.custom_message || "").trim();
+
+            if (clipIds.length === 0) {
+                return sendJson(res, 400, { error: "Seleziona almeno un'immagine o mini clip da inviare." });
+            }
+            if (recipientIds.length === 0) {
+                return sendJson(res, 400, { error: "Seleziona almeno un account destinatario." });
+            }
+
+            const senderName = currentUser.display_name || currentUser.username || "Roberto";
+            const ts = nowIso();
+            const ins = db.prepare(
+                `INSERT INTO media_popup_deliveries
+                 (clip_id, sender_id, sender_name, recipient_user_id, custom_message, seen, created_at)
+                 VALUES (?, ?, ?, ?, ?, 0, ?)`
+            );
+
+            let sentCount = 0;
+            for (const uid of recipientIds) {
+                for (const cid of clipIds) {
+                    const clipExists = db.prepare("SELECT id FROM media_clips WHERE id = ?").get(cid);
+                    if (clipExists) {
+                        ins.run(cid, currentUser.id, senderName, uid, customMessage, ts);
+                        sentCount++;
+                    }
+                }
+            }
+
+            return sendJson(res, 200, {
+                sent: true,
+                sent_count: sentCount,
+                recipients_count: recipientIds.length,
+                clips_count: clipIds.length,
+            });
+        }
+
+        if (pathname === "/api/media-popups/pending" && method === "GET") {
+            const rows = db
+                .prepare(
+                    `SELECT d.id AS delivery_id, d.clip_id, d.sender_id, d.sender_name, d.custom_message, d.created_at,
+                            c.title, c.file_name, c.mime_type, c.media_kind
+                     FROM media_popup_deliveries d
+                     JOIN media_clips c ON c.id = d.clip_id
+                     WHERE d.recipient_user_id = ? AND d.seen = 0
+                     ORDER BY d.id ASC`
+                )
+                .all(Number(currentUser.id || 0))
+                .map((r) => ({
+                    ...r,
+                    url: `/api/media-clips/file/${encodeURIComponent(r.file_name)}`,
+                }));
+            return sendJson(res, 200, { popups: rows });
+        }
+
+        if (pathname === "/api/media-popups/ack" && method === "POST") {
+            const data = await readJsonBody(req);
+            const deliveryIds = Array.isArray(data.delivery_ids)
+                ? data.delivery_ids.map((n) => Number(n)).filter((n) => n > 0)
+                : [];
+            if (deliveryIds.length > 0) {
+                const upd = db.prepare("UPDATE media_popup_deliveries SET seen = 1 WHERE id = ? AND recipient_user_id = ?");
+                for (const did of deliveryIds) {
+                    upd.run(did, Number(currentUser.id || 0));
+                }
+            } else {
+                db.prepare("UPDATE media_popup_deliveries SET seen = 1 WHERE recipient_user_id = ?").run(Number(currentUser.id || 0));
+            }
+            return sendJson(res, 200, { ok: true });
         }
 
         return sendJson(res, 404, { error: "Endpoint non trovato" });
