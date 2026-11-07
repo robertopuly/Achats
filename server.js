@@ -1901,3 +1901,10 @@ serverPrimary.listen(PORT, "0.0.0.0", () => {
     console.log(` [LAN] http://${lanIp}:${PORT}`);
     console.log("================================================================");
 });
+
+// Porta secondaria (8091) per permettere alle WebApp salvate sulla Schermata Home di iPhone (iOS)
+// di aprire il file PDF direttamente dentro l'app Safari (con barra Condividi e Stampa) senza bloccare la WebApp
+const PDF_PORT = PORT + 1;
+const serverPdf = http.createServer(handleRequest);
+serverPdf.on("error", () => {});
+serverPdf.listen(PDF_PORT, "0.0.0.0");

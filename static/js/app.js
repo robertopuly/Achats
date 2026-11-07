@@ -2301,19 +2301,15 @@ function openMobilePdfModal(pdfUrl, fileName, filterLabel) {
     document.body.classList.add("printing-mobile-pdf");
     overlay.classList.remove("hidden");
 
-    // 1. Configura il pulsante "🖨️ Stampa / PDF" per aprire il vero file PDF in Safari (anche se l'app è nella Schermata Home di iPhone!)
+    // 1. Configura il pulsante "🖨️ Stampa / PDF" per aprire il vero file PDF in Safari (usando la porta secondaria 8091 così iOS apre Safari con la barra Condividi/Stampa senza bloccare l'app!)
     const openPdfBtn = document.getElementById("btn-mobile-pdf-open");
     if (openPdfBtn) {
         const inlinePdfPath = `${pdfUrl}&inline=1`;
-        const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent || "");
-        if (isIOS && window.navigator.standalone === true) {
-            // Quando l'app è aperta dall'icona sulla Schermata Home di iOS, x-safari-http:// apre il PDF direttamente in Safari (con i tasti Stampa e Condividi di iOS) senza bloccare l'app!
-            openPdfBtn.href = `x-safari-${window.location.protocol}//${window.location.host}${inlinePdfPath}`;
-            openPdfBtn.removeAttribute("target");
-        } else {
-            openPdfBtn.href = inlinePdfPath;
-            openPdfBtn.setAttribute("target", "_blank");
-        }
+        const currentPort = Number(window.location.port || 8090);
+        const pdfPort = currentPort + 1;
+        const externalOriginUrl = `${window.location.protocol}//${window.location.hostname}:${pdfPort}${inlinePdfPath}`;
+        openPdfBtn.href = externalOriginUrl;
+        openPdfBtn.setAttribute("target", "_blank");
     }
 
     // 2. Configura il pulsante "💬 WhatsApp" con il testo formattato della lista
