@@ -394,26 +394,33 @@ async function addNewFornitoreFromModal(e) {
 }
 
 // ============================================================================
-// NAVIGAZIONE TRA "LISTA DELLA SPESA" E "DATABASE ACQUISTI"
+// NAVIGAZIONE TRA "LISTA DELLA SPESA", "DATABASE ACQUISTI" E "ANALISI PRODOTTI"
 // ============================================================================
 async function switchMainSection(section) {
-    if (section === "db" && isSmartphoneDevice()) {
+    if ((section === "db" || section === "analytics") && isSmartphoneDevice()) {
         section = "list";
     }
     state.activeSection = section;
     const isList = section === "list";
+    const isDb = section === "db";
+    const isAnalytics = section === "analytics";
 
-    document.getElementById("nav-tab-list").classList.toggle("active", isList);
-    document.getElementById("nav-tab-db").classList.toggle("active", !isList);
+    document.getElementById("nav-tab-list")?.classList.toggle("active", isList);
+    document.getElementById("nav-tab-db")?.classList.toggle("active", isDb);
+    document.getElementById("nav-tab-analytics")?.classList.toggle("active", isAnalytics);
 
-    document.getElementById("list-header-toolbar").classList.toggle("hidden", !isList);
-    document.getElementById("db-header-toolbar").classList.toggle("hidden", isList);
+    document.getElementById("list-header-toolbar")?.classList.toggle("hidden", !isList);
+    document.getElementById("db-header-toolbar")?.classList.toggle("hidden", !isDb);
+    document.getElementById("analytics-header-toolbar")?.classList.toggle("hidden", !isAnalytics);
 
-    document.getElementById("section-shopping-list").classList.toggle("hidden", !isList);
-    document.getElementById("section-database-acquisti").classList.toggle("hidden", isList);
+    document.getElementById("section-shopping-list")?.classList.toggle("hidden", !isList);
+    document.getElementById("section-database-acquisti")?.classList.toggle("hidden", !isDb);
+    document.getElementById("section-analytics")?.classList.toggle("hidden", !isAnalytics);
 
-    if (!isList) {
+    if (isDb) {
         await loadAcquistiDatabase();
+    } else if (isAnalytics) {
+        await loadAnalyticsDashboard();
     } else if (state.currentList) {
         await loadSingleList(state.currentList.id);
     }
@@ -3207,5 +3214,1068 @@ async function acknowledgeIncomingMediaPopup() {
         });
     } catch (_) {}
 }
+
+// ============================================================================
+// SEZIONE 3: ANALISI PRODOTTI & GRAFICI AVANZATI (SOLO PC — UI/UX PRO MAX)
+// ============================================================================
+const analyticsState = {
+    loaded: false,
+    rawAcquisti: [],
+    rawListItems: [],
+    rawCatalog: [],
+    rawSupplierPrices: [],
+    rawCategories: [],
+    rawFornitori: [],
+    source: "combined",
+    primaryMetric: "spend", // 'spend' | 'qty' | 'unit_price'
+    distMode: "category", // 'category' | 'supplier'
+    sortBy: "spend_desc",
+    searchQuery: "",
+    filterCategory: "ALL",
+    filterSupplier: "ALL",
+    filterYear: "ALL",
+    filterMonth: "ALL",
+    minPrice: "",
+    maxPrice: "",
+    minQty: "",
+    focusProductName: "",
+};
+
+const ANALYTICS_PALETTE = [
+    "#2563eb",
+    "#7c3aed",
+    "#ec4899",
+    "#10b981",
+    "#f59e0b",
+    "#06b6d4",
+    "#f43f5e",
+    "#6366f1",
+    "#14b8a6",
+    "#8b5cf6",
+    "#ea580c",
+    "#0ea5e9",
+];
+
+function getAnalyticsCategoryColor(catName) {
+    const upper = String(catName || "ALTRO").toUpperCase();
+    const found = (analyticsState.rawCategories || state.categories || []).find(
+        (c) => String(c.name || "").toUpperCase() === upper
+    );
+    if (found && found.color) return found.color;
+    const map = {
+        VERDURA: "#16a34a",
+        FRUTTA: "#ea580c",
+        ALIMENTARI: "#ca8a04",
+        "PULIZIA E CASA": "#9333ea",
+        VARIE: "#475569",
+    };
+    return map[upper] || "#2563eb";
+}
+
+async function loadAnalyticsDashboard(forceReload = false) {
+    try {
+        const data = await apiFetch("/api/analytics/products");
+        analyticsState.rawAcquisti = data.acquisti || [];
+        analyticsState.rawListItems = data.list_items || [];
+        analyticsState.rawCatalog = data.catalog || [];
+        analyticsState.rawSupplierPrices = data.supplier_prices || [];
+        analyticsState.rawCategories = data.categories || [];
+        analyticsState.rawFornitori = data.fornitori || [];
+        analyticsState.loaded = true;
+
+        populateAnalyticsFilterDropdowns();
+        renderAnalyticsDashboard();
+        if (forceReload) {
+            showToast("📈 Dati e grafici analitici aggiornati!", "success");
+        }
+    } catch (err) {
+        showToast(err.message || "Errore nel caricamento dell'analisi prodotti");
+    }
+}
+
+function populateAnalyticsFilterDropdowns() {
+    const catSel = document.getElementById("an-filter-category");
+    if (catSel) {
+        const prev = analyticsState.filterCategory || "ALL";
+        const cats = new Set();
+        (analyticsState.rawCategories || []).forEach((c) => cats.add(String(c.name || "").toUpperCase()));
+        (analyticsState.rawCatalog || []).forEach((c) => cats.add(String(c.category || "").toUpperCase()));
+        (analyticsState.rawAcquisti || []).forEach((r) => cats.add(String(r.categoria || "").toUpperCase()));
+        (analyticsState.rawListItems || []).forEach((r) => cats.add(String(r.category || "").toUpperCase()));
+
+        catSel.innerHTML = `<option value="ALL">Tutte le categorie</option>`;
+        for (const c of Array.from(cats).filter(Boolean)) {
+            const opt = document.createElement("option");
+            opt.value = c;
+            opt.textContent = c;
+            if (c === prev) opt.selected = true;
+            catSel.appendChild(opt);
+        }
+    }
+
+    const supSel = document.getElementById("an-filter-supplier");
+    if (supSel) {
+        const prev = analyticsState.filterSupplier || "ALL";
+        const sups = new Set();
+        (analyticsState.rawFornitori || []).forEach((f) => sups.add(f.nome));
+        (analyticsState.rawAcquisti || []).forEach((r) => sups.add(r.fornitore || "Aldi"));
+        (analyticsState.rawListItems || []).forEach((r) => sups.add(r.fornitore || "Aldi"));
+
+        supSel.innerHTML = `<option value="ALL">Tutti i fornitori</option>`;
+        for (const s of Array.from(sups).filter(Boolean)) {
+            const opt = document.createElement("option");
+            opt.value = s;
+            opt.textContent = s;
+            if (s.toLowerCase() === prev.toLowerCase()) opt.selected = true;
+            supSel.appendChild(opt);
+        }
+    }
+
+    const yearSel = document.getElementById("an-filter-year");
+    if (yearSel) {
+        const prev = analyticsState.filterYear || "ALL";
+        const years = new Set([String(new Date().getFullYear())]);
+        (analyticsState.rawAcquisti || []).forEach((r) => {
+            const y = String(r.anno || String(r.data_acquisto || "").slice(0, 4));
+            if (/^\d{4}$/.test(y)) years.add(y);
+        });
+        (analyticsState.rawListItems || []).forEach((r) => {
+            const y = String(r.list_date || "").slice(0, 4);
+            if (/^\d{4}$/.test(y)) years.add(y);
+        });
+
+        yearSel.innerHTML = `<option value="ALL">Tutti gli anni</option>`;
+        for (const y of Array.from(years).sort((a, b) => b.localeCompare(a))) {
+            const opt = document.createElement("option");
+            opt.value = y;
+            opt.textContent = y;
+            if (y === prev) opt.selected = true;
+            yearSel.appendChild(opt);
+        }
+    }
+}
+
+function setAnalyticsPrimaryMetric(metric) {
+    analyticsState.primaryMetric = metric;
+    ["spend", "qty", "unit_price"].forEach((m) => {
+        document.getElementById(`an-metric-btn-${m}`)?.classList.toggle("active", m === metric);
+    });
+    renderAnalyticsDashboard();
+}
+
+function setAnalyticsDistMode(mode) {
+    analyticsState.distMode = mode;
+    document.getElementById("an-dist-btn-cat")?.classList.toggle("active", mode === "category");
+    document.getElementById("an-dist-btn-sup")?.classList.toggle("active", mode === "supplier");
+    renderAnalyticsDashboard();
+}
+
+function setAnalyticsFocusProduct(prodName) {
+    if (analyticsState.focusProductName === prodName) {
+        analyticsState.focusProductName = "";
+    } else {
+        analyticsState.focusProductName = prodName || "";
+    }
+    renderAnalyticsDashboard();
+}
+
+let anSearchTimer = null;
+function onAnalyticsSearchInput(val) {
+    analyticsState.searchQuery = String(val || "").trim();
+    clearTimeout(anSearchTimer);
+    anSearchTimer = setTimeout(() => {
+        renderAnalyticsDashboard();
+    }, 120);
+}
+
+function onAnalyticsControlChange() {
+    analyticsState.source = document.getElementById("an-source-select")?.value || "combined";
+    analyticsState.sortBy = document.getElementById("an-sort-select")?.value || "spend_desc";
+    analyticsState.filterCategory = document.getElementById("an-filter-category")?.value || "ALL";
+    analyticsState.filterSupplier = document.getElementById("an-filter-supplier")?.value || "ALL";
+    analyticsState.filterYear = document.getElementById("an-filter-year")?.value || "ALL";
+    analyticsState.filterMonth = document.getElementById("an-filter-month")?.value || "ALL";
+    analyticsState.minPrice = document.getElementById("an-filter-min-price")?.value || "";
+    analyticsState.maxPrice = document.getElementById("an-filter-max-price")?.value || "";
+    analyticsState.minQty = document.getElementById("an-filter-min-qty")?.value || "";
+    renderAnalyticsDashboard();
+}
+
+function resetAnalyticsFilters() {
+    analyticsState.searchQuery = "";
+    analyticsState.filterCategory = "ALL";
+    analyticsState.filterSupplier = "ALL";
+    analyticsState.filterYear = "ALL";
+    analyticsState.filterMonth = "ALL";
+    analyticsState.minPrice = "";
+    analyticsState.maxPrice = "";
+    analyticsState.minQty = "";
+    analyticsState.focusProductName = "";
+
+    const setVal = (id, v) => {
+        const el = document.getElementById(id);
+        if (el) el.value = v;
+    };
+    setVal("an-search-input", "");
+    setVal("an-filter-category", "ALL");
+    setVal("an-filter-supplier", "ALL");
+    setVal("an-filter-year", "ALL");
+    setVal("an-filter-month", "ALL");
+    setVal("an-filter-min-price", "");
+    setVal("an-filter-max-price", "");
+    setVal("an-filter-min-qty", "");
+
+    renderAnalyticsDashboard();
+}
+
+function toggleAnalyticsTableSort(col) {
+    const mapToggle = {
+        name: analyticsState.sortBy === "name_asc" ? "name_desc" : "name_asc",
+        qty: analyticsState.sortBy === "qty_desc" ? "qty_asc" : "qty_desc",
+        freq: "freq_desc",
+        unit: analyticsState.sortBy === "unit_desc" ? "unit_asc" : "unit_desc",
+        avg: "avg_desc",
+        spend: analyticsState.sortBy === "spend_desc" ? "spend_asc" : "spend_desc",
+    };
+    analyticsState.sortBy = mapToggle[col] || "spend_desc";
+    const sortSel = document.getElementById("an-sort-select");
+    if (sortSel) sortSel.value = analyticsState.sortBy;
+    renderAnalyticsDashboard();
+}
+
+function parseAnalyticsQty(rawQty, isPurchasedOrActive = false) {
+    if (typeof rawQty === "number") return rawQty > 0 ? rawQty : isPurchasedOrActive ? 1 : 0;
+    const cleaned = String(rawQty || "").replace(",", ".").trim();
+    const m = cleaned.match(/(\d+(?:\.\d+)?)/);
+    if (m) return parseFloat(m[1]);
+    return isPurchasedOrActive ? 1 : 0;
+}
+
+function buildAnalyticsDataset() {
+    const source = analyticsState.source || "combined";
+    const catalogMap = new Map();
+    for (const c of analyticsState.rawCatalog || []) {
+        catalogMap.set(String(c.name || "").trim().toLowerCase(), c);
+    }
+
+    const supplierPriceMap = new Map();
+    for (const sp of analyticsState.rawSupplierPrices || []) {
+        const k = String(sp.product_name || "").trim().toLowerCase();
+        if (!supplierPriceMap.has(k)) supplierPriceMap.set(k, new Map());
+        supplierPriceMap.get(k).set(sp.fornitore || "Aldi", Number(sp.unit_price || 0));
+    }
+
+    // Costruisce la lista di eventi / record normalizzati in base alla fonte scelta
+    const records = [];
+    const importedListItemIds = new Set();
+
+    if (source === "db_only" || source === "combined") {
+        for (const r of analyticsState.rawAcquisti || []) {
+            if (r.list_item_id) importedListItemIds.add(Number(r.list_item_id));
+            const name = String(r.descrizione_prodotto || "").trim();
+            if (!name) continue;
+            const catItem = catalogMap.get(name.toLowerCase());
+            const category = String(r.categoria || catItem?.category || "ALIMENTARI").toUpperCase();
+            const supplier = String(r.fornitore || catItem?.last_fornitore || "Aldi").trim();
+            const unit = String(r.unita || catItem?.default_unit || "Pz").trim();
+            const qty = Number(r.quantita) > 0 ? Number(r.quantita) : 1;
+            const unitPrice = Number(r.prezzo_unitario) > 0 ? Number(r.prezzo_unitario) : Number(catItem?.last_unit_price || 0);
+            const spend = Number(r.prezzo_totale) > 0 ? Number(r.prezzo_totale) : qty * unitPrice;
+            const dateStr = String(r.giorno || r.data_acquisto || "").slice(0, 10);
+            records.push({
+                name,
+                category,
+                supplier,
+                unit,
+                qty,
+                unitPrice,
+                spend,
+                date: dateStr,
+            });
+        }
+    }
+
+    if (source === "combined" || source === "all_lists" || source === "current_list") {
+        const activeListId = state.currentList ? Number(state.currentList.id) : null;
+        for (const li of analyticsState.rawListItems || []) {
+            if (source === "current_list" && activeListId && Number(li.list_id) !== activeListId) {
+                continue;
+            }
+            if (source === "combined" && importedListItemIds.has(Number(li.item_id))) {
+                continue;
+            }
+            const isActiveOrPurchased =
+                li.purchased === 1 || li.in_list === 1 || String(li.quantity || "").trim() !== "";
+            if (!isActiveOrPurchased) continue;
+
+            const name = String(li.name || "").trim();
+            if (!name) continue;
+            const catItem = catalogMap.get(name.toLowerCase());
+            const category = String(li.category || catItem?.category || "ALIMENTARI").toUpperCase();
+            const supplier = String(li.fornitore || catItem?.last_fornitore || "Aldi").trim();
+            const unit = String(li.unit || catItem?.default_unit || "Pz").trim();
+            const qty = parseAnalyticsQty(li.quantity, true);
+            const unitPrice = Number(li.unit_price) > 0 ? Number(li.unit_price) : Number(catItem?.last_unit_price || 0);
+            const spend = Number(li.total_price) > 0 ? Number(li.total_price) : qty * unitPrice;
+            const dateStr = String(li.list_date || "").slice(0, 10);
+
+            records.push({
+                name,
+                category,
+                supplier,
+                unit,
+                qty,
+                unitPrice,
+                spend,
+                date: dateStr,
+            });
+        }
+    }
+
+    if (source === "catalog") {
+        for (const c of analyticsState.rawCatalog || []) {
+            const name = String(c.name || "").trim();
+            if (!name) continue;
+            const unitPrice = Number(c.last_unit_price || 0);
+            records.push({
+                name,
+                category: String(c.category || "ALIMENTARI").toUpperCase(),
+                supplier: String(c.last_fornitore || "Aldi").trim(),
+                unit: String(c.default_unit || "Pz").trim(),
+                qty: 1,
+                unitPrice,
+                spend: unitPrice,
+                date: todayISO(),
+            });
+        }
+    }
+
+    // Applica i filtri a livello di record (Categoria, Fornitore, Anno, Mese, Ricerca)
+    const q = (analyticsState.searchQuery || "").toLowerCase();
+    const fCat = analyticsState.filterCategory || "ALL";
+    const fSup = analyticsState.filterSupplier || "ALL";
+    const fYear = analyticsState.filterYear || "ALL";
+    const fMonth = analyticsState.filterMonth || "ALL";
+
+    const filteredRecords = records.filter((rec) => {
+        if (fCat !== "ALL" && rec.category.toUpperCase() !== fCat.toUpperCase()) return false;
+        if (fSup !== "ALL" && rec.supplier.toLowerCase() !== fSup.toLowerCase()) return false;
+        if (fYear !== "ALL" && String(rec.date).slice(0, 4) !== fYear) return false;
+        if (fMonth !== "ALL" && String(rec.date).slice(5, 7) !== fMonth) return false;
+        if (
+            q &&
+            !rec.name.toLowerCase().includes(q) &&
+            !rec.category.toLowerCase().includes(q) &&
+            !rec.supplier.toLowerCase().includes(q)
+        ) {
+            return false;
+        }
+        return true;
+    });
+
+    // Aggrega per Prodotto
+    const productMap = new Map();
+    for (const rec of filteredRecords) {
+        const key = rec.name.toLowerCase();
+        if (!productMap.has(key)) {
+            const catItem = catalogMap.get(key);
+            productMap.set(key, {
+                name: rec.name,
+                category: rec.category,
+                unit: rec.unit || catItem?.default_unit || "Pz",
+                totalQty: 0,
+                totalSpend: 0,
+                freq: 0,
+                currentUnitPrice: Number(catItem?.last_unit_price || 0),
+                latestDate: "",
+                minPrice: Infinity,
+                maxPrice: 0,
+                pricePoints: [],
+                suppliers: new Map(),
+            });
+        }
+        const p = productMap.get(key);
+        p.totalQty += rec.qty;
+        p.totalSpend += rec.spend;
+        p.freq += 1;
+
+        if (!p.latestDate || rec.date >= p.latestDate) {
+            p.latestDate = rec.date;
+            if (rec.unitPrice > 0) {
+                p.currentUnitPrice = rec.unitPrice;
+            }
+        }
+        if (rec.unitPrice > 0) {
+            if (rec.unitPrice < p.minPrice) p.minPrice = rec.unitPrice;
+            if (rec.unitPrice > p.maxPrice) p.maxPrice = rec.unitPrice;
+            p.pricePoints.push({
+                date: rec.date,
+                price: rec.unitPrice,
+                supplier: rec.supplier,
+                qty: rec.qty,
+            });
+        }
+
+        if (!p.suppliers.has(rec.supplier)) {
+            p.suppliers.set(rec.supplier, { qty: 0, spend: 0, lastPrice: rec.unitPrice });
+        }
+        const supEntry = p.suppliers.get(rec.supplier);
+        supEntry.qty += rec.qty;
+        supEntry.spend += rec.spend;
+        if (rec.unitPrice > 0) supEntry.lastPrice = rec.unitPrice;
+    }
+
+    // Arricchisce con eventuali prezzi per fornitore salvati in supplier_product_prices
+    for (const [key, p] of productMap.entries()) {
+        const spMap = supplierPriceMap.get(key);
+        if (spMap) {
+            for (const [sName, sPrice] of spMap.entries()) {
+                if (fSup !== "ALL" && sName.toLowerCase() !== fSup.toLowerCase()) continue;
+                if (!p.suppliers.has(sName)) {
+                    p.suppliers.set(sName, { qty: 0, spend: 0, lastPrice: sPrice });
+                } else if (!(p.suppliers.get(sName).lastPrice > 0)) {
+                    p.suppliers.get(sName).lastPrice = sPrice;
+                }
+            }
+        }
+        if (p.minPrice === Infinity) p.minPrice = p.currentUnitPrice || 0;
+        if (p.maxPrice === 0) p.maxPrice = p.currentUnitPrice || 0;
+        p.avgUnitPrice =
+            p.pricePoints.length > 0
+                ? p.pricePoints.reduce((s, x) => s + x.price, 0) / p.pricePoints.length
+                : p.currentUnitPrice || 0;
+        if (!(p.currentUnitPrice > 0) && p.avgUnitPrice > 0) {
+            p.currentUnitPrice = p.avgUnitPrice;
+        }
+    }
+
+    // Applica filtri su Prezzo Min/Max e Quantità Minima
+    const minP = parseFloat(analyticsState.minPrice);
+    const maxP = parseFloat(analyticsState.maxPrice);
+    const minQ = parseFloat(analyticsState.minQty);
+
+    let products = Array.from(productMap.values()).filter((p) => {
+        const refPrice = p.currentUnitPrice || p.avgUnitPrice || 0;
+        if (!isNaN(minP) && minP > 0 && refPrice < minP) return false;
+        if (!isNaN(maxP) && maxP > 0 && refPrice > maxP) return false;
+        if (!isNaN(minQ) && minQ > 0 && p.totalQty < minQ) return false;
+        return true;
+    });
+
+    // Ordinamento personalizzato
+    const sortBy = analyticsState.sortBy || "spend_desc";
+    products.sort((a, b) => {
+        if (sortBy === "spend_desc") return b.totalSpend - a.totalSpend || b.totalQty - a.totalQty;
+        if (sortBy === "spend_asc") return a.totalSpend - b.totalSpend || a.totalQty - b.totalQty;
+        if (sortBy === "qty_desc") return b.totalQty - a.totalQty || b.totalSpend - a.totalSpend;
+        if (sortBy === "qty_asc") return a.totalQty - b.totalQty || a.totalSpend - b.totalSpend;
+        if (sortBy === "unit_desc") return b.currentUnitPrice - a.currentUnitPrice || b.totalSpend - a.totalSpend;
+        if (sortBy === "unit_asc") return (a.currentUnitPrice || 999999) - (b.currentUnitPrice || 999999);
+        if (sortBy === "avg_desc") return b.avgUnitPrice - a.avgUnitPrice;
+        if (sortBy === "freq_desc") return b.freq - a.freq || b.totalQty - a.totalQty;
+        if (sortBy === "name_asc") return a.name.localeCompare(b.name, "it", { sensitivity: "base" });
+        if (sortBy === "name_desc") return b.name.localeCompare(a.name, "it", { sensitivity: "base" });
+        return b.totalSpend - a.totalSpend;
+    });
+
+    return { products, filteredRecords };
+}
+
+function renderAnalyticsDashboard() {
+    if (!document.getElementById("section-analytics")) return;
+    const { products, filteredRecords } = buildAnalyticsDataset();
+
+    const totalSpend = products.reduce((s, p) => s + p.totalSpend, 0);
+    const totalQty = products.reduce((s, p) => s + p.totalQty, 0);
+    const pricedProds = products.filter((p) => p.currentUnitPrice > 0);
+    const avgUnitPrice =
+        pricedProds.length > 0
+            ? pricedProds.reduce((s, p) => s + p.currentUnitPrice, 0) / pricedProds.length
+            : 0;
+
+    // Aggiorna le 5 Hero KPI Cards
+    const setTxt = (id, t) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = t;
+    };
+    setTxt("an-kpi-total-spend", `${totalSpend.toFixed(2)}`);
+    setTxt("an-kpi-spend-sub", `CHF/€ su ${filteredRecords.length} registrazioni`);
+    setTxt("an-kpi-total-qty", `${Math.round(totalQty * 100) / 100}`);
+    setTxt(
+        "an-kpi-qty-sub",
+        `Media ${products.length > 0 ? (totalQty / products.length).toFixed(1) : "0"} unità / prodotto`
+    );
+    setTxt("an-kpi-unique-products", `${products.length}`);
+    setTxt("an-kpi-avg-price-sub", `Prezzo unit. medio: ${avgUnitPrice.toFixed(2)} CHF/€`);
+
+    const byPrimary = [...products].sort((a, b) => {
+        if (analyticsState.primaryMetric === "qty") return b.totalQty - a.totalQty;
+        if (analyticsState.primaryMetric === "unit_price") return b.currentUnitPrice - a.currentUnitPrice;
+        return b.totalSpend - a.totalSpend;
+    });
+    const topProd = byPrimary[0];
+    if (topProd) {
+        setTxt("an-kpi-top-product", topProd.name);
+        setTxt(
+            "an-kpi-top-product-sub",
+            `${topProd.totalSpend.toFixed(2)} CHF/€ • Q.tà: ${Math.round(topProd.totalQty * 100) / 100} ${topProd.unit}`
+        );
+    } else {
+        setTxt("an-kpi-top-product", "—");
+        setTxt("an-kpi-top-product-sub", "Nessun dato");
+    }
+
+    // Calcola Top Fornitore & Top Categoria
+    const supTotals = new Map();
+    const catTotals = new Map();
+    for (const r of filteredRecords) {
+        const val = analyticsState.primaryMetric === "qty" ? r.qty : r.spend;
+        supTotals.set(r.supplier, (supTotals.get(r.supplier) || 0) + val);
+        catTotals.set(r.category, (catTotals.get(r.category) || 0) + val);
+    }
+    const topSupEntry = Array.from(supTotals.entries()).sort((a, b) => b[1] - a[1])[0];
+    const topCatEntry = Array.from(catTotals.entries()).sort((a, b) => b[1] - a[1])[0];
+    setTxt("an-kpi-top-supplier", topSupEntry ? topSupEntry[0] : "—");
+    setTxt("an-kpi-top-cat-sub", topCatEntry ? `1° Reparto: ${topCatEntry[0]}` : "—");
+
+    // Renderizza i 4 Grafici Avanzati + la Tabella
+    renderAnalyticsTopProductsChart(byPrimary, totalSpend, totalQty);
+    renderAnalyticsDistributionChart(filteredRecords);
+    renderAnalyticsScatterChart(products);
+    renderAnalyticsTrendChart(filteredRecords, products);
+    renderAnalyticsProductsTable(products, totalSpend, totalQty);
+}
+
+function renderAnalyticsTopProductsChart(sortedProducts, totalSpend, totalQty) {
+    const container = document.getElementById("an-chart-top-products");
+    if (!container) return;
+    const limit = Number(document.getElementById("an-top-limit-select")?.value || 15);
+    const slice = sortedProducts.slice(0, limit);
+
+    if (slice.length === 0) {
+        container.innerHTML = `<div class="empty-state" style="padding:36px 12px;"><p>Nessun prodotto corrisponde ai filtri selezionati.</p></div>`;
+        return;
+    }
+
+    const metric = analyticsState.primaryMetric;
+    const maxVal = Math.max(
+        ...slice.map((p) =>
+            metric === "qty" ? p.totalQty : metric === "unit_price" ? p.currentUnitPrice : p.totalSpend
+        ),
+        0.01
+    );
+
+    container.innerHTML = slice
+        .map((p, idx) => {
+            const rank = idx + 1;
+            const rankClass = rank <= 3 ? `rank-${rank}` : "";
+            const val =
+                metric === "qty"
+                    ? p.totalQty
+                    : metric === "unit_price"
+                    ? p.currentUnitPrice
+                    : p.totalSpend;
+            const widthPct = Math.max(4, Math.min(100, (val / maxVal) * 100));
+            const catColor = getAnalyticsCategoryColor(p.category);
+            const isFocused =
+                analyticsState.focusProductName &&
+                analyticsState.focusProductName.toLowerCase() === p.name.toLowerCase();
+
+            let primaryLabel = `${p.totalSpend.toFixed(2)} CHF/€`;
+            let secondaryLabel = `Q.tà: ${Math.round(p.totalQty * 100) / 100} ${p.unit} • Unit: ${p.currentUnitPrice.toFixed(2)}`;
+            if (metric === "qty") {
+                primaryLabel = `${Math.round(p.totalQty * 100) / 100} ${escapeHtml(p.unit)}`;
+                secondaryLabel = `Spesa: ${p.totalSpend.toFixed(2)} • Unit: ${p.currentUnitPrice.toFixed(2)}`;
+            } else if (metric === "unit_price") {
+                primaryLabel = `${p.currentUnitPrice.toFixed(2)} / ${escapeHtml(p.unit)}`;
+                secondaryLabel = `Q.tà: ${Math.round(p.totalQty * 100) / 100} • Tot: ${p.totalSpend.toFixed(2)}`;
+            }
+
+            const sups = Array.from(p.suppliers.keys()).join(", ");
+            return `
+                <div class="an-bar-row ${isFocused ? "is-focused" : ""}" onclick="setAnalyticsFocusProduct('${escapeHtmlAttr(p.name)}')" title="Clicca per visualizzare l'andamento prezzo di ${escapeHtmlAttr(p.name)}">
+                    <span class="an-bar-rank ${rankClass}">#${rank}</span>
+                    <div class="an-bar-name-col">
+                        <span class="an-bar-prod-name">${escapeHtml(p.name)}</span>
+                        <span class="an-bar-prod-meta">${escapeHtml(p.category)} • 🏪 ${escapeHtml(sups)}</span>
+                    </div>
+                    <div class="an-bar-track">
+                        <div class="an-bar-fill" style="width:${widthPct.toFixed(1)}%; background: linear-gradient(90deg, ${catColor} 0%, #6366f1 100%);"></div>
+                    </div>
+                    <div class="an-bar-val-col">
+                        <span class="an-bar-val-primary">${primaryLabel}</span>
+                        <span class="an-bar-val-secondary">${secondaryLabel}</span>
+                    </div>
+                </div>
+            `;
+        })
+        .join("");
+}
+
+function renderAnalyticsDistributionChart(filteredRecords) {
+    const container = document.getElementById("an-chart-distribution");
+    if (!container) return;
+
+    const mode = analyticsState.distMode || "category";
+    const metric = analyticsState.primaryMetric === "qty" ? "qty" : "spend";
+    const totals = new Map();
+
+    for (const r of filteredRecords) {
+        const key = mode === "supplier" ? r.supplier || "Aldi" : r.category || "ALTRO";
+        const val = metric === "qty" ? r.qty : r.spend;
+        totals.set(key, (totals.get(key) || 0) + val);
+    }
+
+    const entries = Array.from(totals.entries())
+        .filter((e) => e[1] > 0)
+        .sort((a, b) => b[1] - a[1]);
+
+    if (entries.length === 0) {
+        container.innerHTML = `<div class="empty-state" style="grid-column:span 2; padding:30px 10px;"><p>Nessun dato per il grafico a ciambella.</p></div>`;
+        return;
+    }
+
+    const grandTotal = entries.reduce((s, e) => s + e[1], 0) || 1;
+    const radius = 72;
+    const circumference = 2 * Math.PI * radius;
+    let accumPct = 0;
+
+    const circlesSvg = entries
+        .map(([label, val], idx) => {
+            const pct = val / grandTotal;
+            const dash = pct * circumference;
+            const offset = -accumPct * circumference;
+            accumPct += pct;
+            const color =
+                mode === "category"
+                    ? getAnalyticsCategoryColor(label)
+                    : ANALYTICS_PALETTE[idx % ANALYTICS_PALETTE.length];
+            return `<circle cx="100" cy="100" r="${radius}" fill="transparent" stroke="${color}" stroke-width="26" stroke-dasharray="${dash.toFixed(2)} ${circumference.toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}" />`;
+        })
+        .join("");
+
+    const centerValue =
+        metric === "qty" ? `${Math.round(grandTotal * 10) / 10}` : `${grandTotal.toFixed(2)}`;
+    const centerUnit = metric === "qty" ? "Unità tot." : "CHF/€ tot.";
+
+    const legendHtml = entries
+        .map(([label, val], idx) => {
+            const pct = ((val / grandTotal) * 100).toFixed(1);
+            const color =
+                mode === "category"
+                    ? getAnalyticsCategoryColor(label)
+                    : ANALYTICS_PALETTE[idx % ANALYTICS_PALETTE.length];
+            const valFormatted =
+                metric === "qty" ? `${Math.round(val * 100) / 100} u.` : `${val.toFixed(2)}`;
+            const isActive =
+                (mode === "category" && analyticsState.filterCategory === label) ||
+                (mode === "supplier" &&
+                    analyticsState.filterSupplier.toLowerCase() === label.toLowerCase());
+
+            const clickHandler =
+                mode === "category"
+                    ? `toggleAnalyticsQuickFilter('category', '${escapeHtmlAttr(label)}')`
+                    : `toggleAnalyticsQuickFilter('supplier', '${escapeHtmlAttr(label)}')`;
+
+            return `
+                <div class="an-legend-item ${isActive ? "is-active-filter" : ""}" onclick="${clickHandler}" title="Clicca per filtrare per ${escapeHtmlAttr(label)}">
+                    <div class="an-legend-left">
+                        <span class="an-legend-swatch" style="background:${color};"></span>
+                        <span class="an-legend-name">${escapeHtml(label)}</span>
+                    </div>
+                    <div class="an-legend-right">
+                        ${valFormatted}
+                        <span class="an-legend-pct">${pct}%</span>
+                    </div>
+                </div>
+            `;
+        })
+        .join("");
+
+    container.innerHTML = `
+        <div class="an-donut-svg-wrap">
+            <svg width="200" height="200" viewBox="0 0 200 200">
+                <g transform="rotate(-90 100 100)">
+                    ${circlesSvg}
+                </g>
+                <circle cx="100" cy="100" r="54" fill="#ffffff" />
+                <text x="100" y="96" text-anchor="middle" fill="#0f172a" font-size="16" font-weight="900">${centerValue}</text>
+                <text x="100" y="115" text-anchor="middle" fill="#64748b" font-size="11" font-weight="700">${centerUnit}</text>
+            </svg>
+        </div>
+        <div class="an-donut-legend">
+            ${legendHtml}
+        </div>
+    `;
+}
+
+function toggleAnalyticsQuickFilter(kind, value) {
+    if (kind === "category") {
+        analyticsState.filterCategory = analyticsState.filterCategory === value ? "ALL" : value;
+        const sel = document.getElementById("an-filter-category");
+        if (sel) sel.value = analyticsState.filterCategory;
+    } else if (kind === "supplier") {
+        analyticsState.filterSupplier =
+            analyticsState.filterSupplier.toLowerCase() === value.toLowerCase() ? "ALL" : value;
+        const sel = document.getElementById("an-filter-supplier");
+        if (sel) sel.value = analyticsState.filterSupplier;
+    }
+    renderAnalyticsDashboard();
+}
+
+function renderAnalyticsScatterChart(products) {
+    const container = document.getElementById("an-chart-scatter");
+    if (!container) return;
+
+    const pts = products.filter((p) => p.totalQty > 0 && p.currentUnitPrice > 0).slice(0, 45);
+    if (pts.length === 0) {
+        container.innerHTML = `<div class="empty-state" style="padding:30px 10px;"><p>Inserisci prezzi unitari e quantità per visualizzare la matrice Quantità vs Prezzo.</p></div>`;
+        return;
+    }
+
+    const w = 620;
+    const h = 280;
+    const padL = 52;
+    const padR = 26;
+    const padT = 22;
+    const padB = 38;
+    const plotW = w - padL - padR;
+    const plotH = h - padT - padB;
+
+    const maxQty = Math.max(...pts.map((p) => p.totalQty), 1) * 1.08;
+    const maxPrice = Math.max(...pts.map((p) => p.currentUnitPrice), 1) * 1.1;
+    const maxSpend = Math.max(...pts.map((p) => p.totalSpend), 1);
+
+    const avgQty = pts.reduce((s, p) => s + p.totalQty, 0) / pts.length;
+    const avgPrice = pts.reduce((s, p) => s + p.currentUnitPrice, 0) / pts.length;
+
+    const xOf = (q) => padL + (q / maxQty) * plotW;
+    const yOf = (pr) => padT + plotH - (pr / maxPrice) * plotH;
+
+    const avgX = xOf(avgQty);
+    const avgY = yOf(avgPrice);
+
+    let gridSvg = "";
+    for (let i = 0; i <= 4; i++) {
+        const gy = padT + (plotH / 4) * i;
+        const pVal = ((maxPrice * (4 - i)) / 4).toFixed(1);
+        gridSvg += `
+            <line x1="${padL}" y1="${gy}" x2="${w - padR}" y2="${gy}" stroke="#e2e8f0" stroke-dasharray="3 3" />
+            <text x="${padL - 8}" y="${gy + 4}" text-anchor="end" font-size="10" font-weight="700" fill="#64748b">${pVal}</text>
+        `;
+        const gx = padL + (plotW / 4) * i;
+        const qVal = Math.round(((maxQty * i) / 4) * 10) / 10;
+        gridSvg += `
+            <line x1="${gx}" y1="${padT}" x2="${gx}" y2="${padT + plotH}" stroke="#f1f5f9" />
+            <text x="${gx}" y="${h - 14}" text-anchor="middle" font-size="10" font-weight="700" fill="#64748b">${qVal}</text>
+        `;
+    }
+
+    const bubblesSvg = pts
+        .map((p) => {
+            const cx = xOf(p.totalQty);
+            const cy = yOf(p.currentUnitPrice);
+            const r = 6 + Math.sqrt(p.totalSpend / maxSpend) * 16;
+            const col = getAnalyticsCategoryColor(p.category);
+            const isFocused =
+                analyticsState.focusProductName &&
+                analyticsState.focusProductName.toLowerCase() === p.name.toLowerCase();
+            const shortName = p.name.length > 14 ? p.name.slice(0, 12) + "…" : p.name;
+
+            return `
+                <g class="an-scatter-pt" style="cursor:pointer;" onclick="setAnalyticsFocusProduct('${escapeHtmlAttr(p.name)}')">
+                    <title>${escapeHtml(p.name)} (${escapeHtml(p.category)})\nQuantità: ${Math.round(p.totalQty * 100) / 100} ${escapeHtml(p.unit)}\nPrezzo Unit.: ${p.currentUnitPrice.toFixed(2)}\nSpesa Totale: ${p.totalSpend.toFixed(2)}</title>
+                    <circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}" fill="${col}" fill-opacity="${isFocused ? "0.95" : "0.68"}" stroke="${isFocused ? "#0f172a" : "#ffffff"}" stroke-width="${isFocused ? "2.5" : "1.5"}" />
+                    <text x="${cx.toFixed(1)}" y="${(cy - r - 4).toFixed(1)}" text-anchor="middle" font-size="9.5" font-weight="800" fill="#1e293b">${escapeHtml(shortName)}</text>
+                </g>
+            `;
+        })
+        .join("");
+
+    container.innerHTML = `
+        <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">
+            ${gridSvg}
+            <!-- Linee medie dei quadranti -->
+            <line x1="${avgX.toFixed(1)}" y1="${padT}" x2="${avgX.toFixed(1)}" y2="${padT + plotH}" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="5 4" />
+            <line x1="${padL}" y1="${avgY.toFixed(1)}" x2="${w - padR}" y2="${avgY.toFixed(1)}" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="5 4" />
+            <text x="${w - padR - 4}" y="${padT + 12}" text-anchor="end" font-size="9.5" font-weight="800" fill="#db2777">▲ Alta Q.tà & Alto Prezzo</text>
+            <text x="${padL + plotW / 2}" y="${h - 2}" text-anchor="middle" font-size="10.5" font-weight="800" fill="#334155">Quantità Totale Acquistata →</text>
+            <text x="13" y="${padT + plotH / 2}" text-anchor="middle" font-size="10.5" font-weight="800" fill="#334155" transform="rotate(-90 13 ${padT + plotH / 2})">Prezzo Unitario →</text>
+            ${bubblesSvg}
+        </svg>
+    `;
+}
+
+function renderAnalyticsTrendChart(filteredRecords, products) {
+    const container = document.getElementById("an-chart-trend");
+    const titleEl = document.getElementById("an-trend-chart-title");
+    const subEl = document.getElementById("an-trend-chart-subtitle");
+    const clearBtn = document.getElementById("an-clear-focus-product-btn");
+    if (!container) return;
+
+    const focusName = analyticsState.focusProductName;
+    const focusedProd = focusName
+        ? products.find((p) => p.name.toLowerCase() === focusName.toLowerCase())
+        : null;
+
+    const w = 620;
+    const h = 280;
+    const padL = 52;
+    const padR = 24;
+    const padT = 24;
+    const padB = 42;
+    const plotW = w - padL - padR;
+    const plotH = h - padT - padB;
+
+    if (focusedProd && focusedProd.pricePoints.length > 0) {
+        clearBtn?.classList.remove("hidden");
+        if (titleEl) titleEl.textContent = `📈 Storico Prezzo Unitario: ${focusedProd.name}`;
+        if (subEl) {
+            subEl.textContent = `Prezzo Corrente: ${focusedProd.currentUnitPrice.toFixed(2)} • Min: ${focusedProd.minPrice.toFixed(2)} • Max: ${focusedProd.maxPrice.toFixed(2)}`;
+        }
+
+        const pts = [...focusedProd.pricePoints].sort((a, b) =>
+            String(a.date).localeCompare(String(b.date))
+        );
+        const maxVal = Math.max(...pts.map((x) => x.price), 0.1) * 1.15;
+        const minVal = Math.max(0, Math.min(...pts.map((x) => x.price)) * 0.85);
+        const span = Math.max(maxVal - minVal, 0.5);
+
+        const coords = pts.map((pt, idx) => {
+            const x =
+                pts.length === 1
+                    ? padL + plotW / 2
+                    : padL + (idx / (pts.length - 1)) * plotW;
+            const y = padT + plotH - ((pt.price - minVal) / span) * plotH;
+            return { x, y, ...pt };
+        });
+
+        const pathD = coords
+            .map((c, i) => `${i === 0 ? "M" : "L"}${c.x.toFixed(1)},${c.y.toFixed(1)}`)
+            .join(" ");
+        const areaD =
+            coords.length > 1
+                ? `${pathD} L${coords[coords.length - 1].x.toFixed(1)},${padT + plotH} L${coords[0].x.toFixed(1)},${padT + plotH} Z`
+                : "";
+
+        const dotsSvg = coords
+            .map(
+                (c) => `
+                <g>
+                    <title>${formatDateIT(c.date)} — ${escapeHtml(c.supplier)}: ${c.price.toFixed(2)} (Q.tà: ${c.qty})</title>
+                    <circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="5.5" fill="#ec4899" stroke="#ffffff" stroke-width="2" />
+                    <text x="${c.x.toFixed(1)}" y="${(c.y - 10).toFixed(1)}" text-anchor="middle" font-size="10" font-weight="800" fill="#831843">${c.price.toFixed(2)}</text>
+                    <text x="${c.x.toFixed(1)}" y="${padT + plotH + 16}" text-anchor="middle" font-size="9" font-weight="700" fill="#64748b">${escapeHtml(String(c.date).slice(5))}</text>
+                </g>
+            `
+            )
+            .join("");
+
+        container.innerHTML = `
+            <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">
+                <defs>
+                    <linearGradient id="anPinkGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="#ec4899" stop-opacity="0.38" />
+                        <stop offset="100%" stop-color="#ec4899" stop-opacity="0.02" />
+                    </linearGradient>
+                </defs>
+                <line x1="${padL}" y1="${padT + plotH}" x2="${w - padR}" y2="${padT + plotH}" stroke="#cbd5e1" stroke-width="1.5" />
+                ${areaD ? `<path d="${areaD}" fill="url(#anPinkGrad)" />` : ""}
+                ${coords.length > 1 ? `<path d="${pathD}" fill="none" stroke="#db2777" stroke-width="3" stroke-linecap="round" />` : ""}
+                ${dotsSvg}
+            </svg>
+        `;
+        return;
+    }
+
+    clearBtn?.classList.add("hidden");
+    const metric = analyticsState.primaryMetric === "qty" ? "qty" : "spend";
+    if (titleEl) {
+        titleEl.textContent =
+            metric === "qty"
+                ? "📈 Andamento Temporale Quantità Acquistate"
+                : "📈 Andamento Temporale Spesa (CHF/€)";
+    }
+    if (subEl) {
+        subEl.textContent =
+            "Evoluzione per data di spesa (clicca su un prodotto nella classifica o tabella per vedere lo storico del suo prezzo)";
+    }
+
+    const byDate = new Map();
+    for (const r of filteredRecords) {
+        const d = String(r.date || "").slice(0, 10);
+        if (!d) continue;
+        byDate.set(d, (byDate.get(d) || 0) + (metric === "qty" ? r.qty : r.spend));
+    }
+
+    const series = Array.from(byDate.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .slice(-18);
+
+    if (series.length === 0) {
+        container.innerHTML = `<div class="empty-state" style="padding:30px 10px;"><p>Nessuna data disponibile per il grafico temporale.</p></div>`;
+        return;
+    }
+
+    const maxVal = Math.max(...series.map((s) => s[1]), 1) * 1.12;
+    const coords = series.map(([d, v], idx) => {
+        const x =
+            series.length === 1
+                ? padL + plotW / 2
+                : padL + (idx / (series.length - 1)) * plotW;
+        const y = padT + plotH - (v / maxVal) * plotH;
+        return { x, y, date: d, val: v };
+    });
+
+    const pathD = coords
+        .map((c, i) => `${i === 0 ? "M" : "L"}${c.x.toFixed(1)},${c.y.toFixed(1)}`)
+        .join(" ");
+    const areaD =
+        coords.length > 1
+            ? `${pathD} L${coords[coords.length - 1].x.toFixed(1)},${padT + plotH} L${coords[0].x.toFixed(1)},${padT + plotH} Z`
+            : "";
+
+    let gridSvg = "";
+    for (let i = 0; i <= 4; i++) {
+        const gy = padT + (plotH / 4) * i;
+        const vLabel = ((maxVal * (4 - i)) / 4).toFixed(metric === "qty" ? 0 : 1);
+        gridSvg += `
+            <line x1="${padL}" y1="${gy}" x2="${w - padR}" y2="${gy}" stroke="#e2e8f0" stroke-dasharray="3 3" />
+            <text x="${padL - 8}" y="${gy + 4}" text-anchor="end" font-size="10" font-weight="700" fill="#64748b">${vLabel}</text>
+        `;
+    }
+
+    const dotsSvg = coords
+        .map(
+            (c) => `
+            <g>
+                <title>${formatDateIT(c.date)}: ${metric === "qty" ? Math.round(c.val * 100) / 100 + " unità" : c.val.toFixed(2) + " CHF/€"}</title>
+                <circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="5" fill="#2563eb" stroke="#ffffff" stroke-width="2" />
+                <text x="${c.x.toFixed(1)}" y="${(c.y - 9).toFixed(1)}" text-anchor="middle" font-size="9.5" font-weight="800" fill="#1e3a8a">${metric === "qty" ? Math.round(c.val * 10) / 10 : c.val.toFixed(1)}</text>
+                <text x="${c.x.toFixed(1)}" y="${padT + plotH + 16}" text-anchor="middle" font-size="9" font-weight="700" fill="#64748b">${escapeHtml(c.date.slice(5))}</text>
+            </g>
+        `
+        )
+        .join("");
+
+    container.innerHTML = `
+        <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">
+            <defs>
+                <linearGradient id="anBlueGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#2563eb" stop-opacity="0.36" />
+                    <stop offset="100%" stop-color="#7c3aed" stop-opacity="0.02" />
+                </linearGradient>
+            </defs>
+            ${gridSvg}
+            ${areaD ? `<path d="${areaD}" fill="url(#anBlueGrad)" />` : ""}
+            ${coords.length > 1 ? `<path d="${pathD}" fill="none" stroke="#2563eb" stroke-width="3" stroke-linecap="round" />` : ""}
+            ${dotsSvg}
+        </svg>
+    `;
+}
+
+function renderAnalyticsProductsTable(products, totalSpend, totalQty) {
+    const tbody = document.getElementById("an-products-tbody");
+    const countEl = document.getElementById("an-table-count");
+    if (countEl) countEl.textContent = String(products.length);
+    if (!tbody) return;
+
+    // Aggiorna frecce di ordinamento nelle intestazioni
+    const sortBy = analyticsState.sortBy || "spend_desc";
+    const indMap = {
+        name: sortBy === "name_asc" ? "▲" : sortBy === "name_desc" ? "▼" : "",
+        qty: sortBy === "qty_desc" ? "▼" : sortBy === "qty_asc" ? "▲" : "",
+        freq: sortBy === "freq_desc" ? "▼" : "",
+        unit: sortBy === "unit_desc" ? "▼" : sortBy === "unit_asc" ? "▲" : "",
+        avg: sortBy === "avg_desc" ? "▼" : "",
+        spend: sortBy === "spend_desc" ? "▼" : sortBy === "spend_asc" ? "▲" : "",
+    };
+    Object.entries(indMap).forEach(([k, sym]) => {
+        const el = document.getElementById(`an-sort-ind-${k}`);
+        if (el) el.textContent = sym;
+    });
+
+    if (products.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="8" style="text-align:center; padding:32px; color:#64748b; font-weight:700;">
+                    Nessun prodotto trovato con i filtri attuali. Prova ad allargare i filtri o clicca su "↺ Reset Filtri".
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    const maxSpend = Math.max(...products.map((p) => p.totalSpend), 0.01);
+    const maxQty = Math.max(...products.map((p) => p.totalQty), 0.01);
+
+    tbody.innerHTML = products
+        .map((p, idx) => {
+            const rank = idx + 1;
+            const medal = rank === 1 ? "🥇 " : rank === 2 ? "🥈 " : rank === 3 ? "🥉 " : "";
+            const catColor = getAnalyticsCategoryColor(p.category);
+            const spendPctOfMax = Math.max(3, Math.min(100, (p.totalSpend / maxSpend) * 100));
+            const qtyPctOfMax = Math.max(3, Math.min(100, (p.totalQty / maxQty) * 100));
+            const shareOfTotal = totalSpend > 0 ? ((p.totalSpend / totalSpend) * 100).toFixed(1) : "0.0";
+
+            const supChipsHtml = Array.from(p.suppliers.entries())
+                .map(([sName, sInfo]) => {
+                    const prTxt = sInfo.lastPrice > 0 ? `${sInfo.lastPrice.toFixed(2)}` : "—";
+                    return `<span class="an-sup-chip">🏪 ${escapeHtml(sName)}: <strong>${prTxt}</strong></span>`;
+                })
+                .join("");
+
+            let deltaBadge = "";
+            if (p.currentUnitPrice > 0 && p.avgUnitPrice > 0) {
+                const diff = p.currentUnitPrice - p.avgUnitPrice;
+                if (diff > 0.02) {
+                    deltaBadge = `<div class="an-price-delta-up">▲ +${diff.toFixed(2)} vs media</div>`;
+                } else if (diff < -0.02) {
+                    deltaBadge = `<div class="an-price-delta-down">▼ ${diff.toFixed(2)} vs media</div>`;
+                }
+            }
+
+            const isFocused =
+                analyticsState.focusProductName &&
+                analyticsState.focusProductName.toLowerCase() === p.name.toLowerCase();
+
+            return `
+                <tr class="${isFocused ? "is-focused-row" : ""}" onclick="setAnalyticsFocusProduct('${escapeHtmlAttr(p.name)}')">
+                    <td style="font-weight:900; color:#475569;">${medal}#${rank}</td>
+                    <td>
+                        <div style="font-weight:800; color:#0f172a; font-size:0.92rem;">${escapeHtml(p.name)}</div>
+                        <span class="an-cat-badge" style="background:${catColor};">${escapeHtml(p.category)}</span>
+                    </td>
+                    <td>
+                        <div class="an-sup-chips">${supChipsHtml || "—"}</div>
+                    </td>
+                    <td class="num-col">
+                        <strong style="font-size:0.94rem; color:#4f46e5;">${Math.round(p.totalQty * 100) / 100}</strong>
+                        <span style="font-size:0.75rem; color:#64748b;">${escapeHtml(p.unit)}</span>
+                        <div class="an-inline-progress"><div class="an-inline-fill-qty" style="width:${qtyPctOfMax.toFixed(1)}%;"></div></div>
+                    </td>
+                    <td class="num-col">
+                        <strong>${p.freq}×</strong>
+                        <div style="font-size:0.72rem; color:#64748b;">${p.latestDate ? formatDateIT(p.latestDate) : "—"}</div>
+                    </td>
+                    <td class="num-col">
+                        <strong style="font-size:0.94rem; color:#0f172a;">${p.currentUnitPrice > 0 ? p.currentUnitPrice.toFixed(2) : "—"}</strong>
+                        ${deltaBadge}
+                    </td>
+                    <td class="num-col">
+                        <strong>${p.avgUnitPrice > 0 ? p.avgUnitPrice.toFixed(2) : "—"}</strong>
+                        <div style="font-size:0.71rem; color:#64748b;">Min ${p.minPrice.toFixed(2)} / Max ${p.maxPrice.toFixed(2)}</div>
+                    </td>
+                    <td class="num-col">
+                        <strong style="font-size:0.98rem; color:#0f172a;">${p.totalSpend.toFixed(2)} CHF/€</strong>
+                        <span class="an-legend-pct">${shareOfTotal}%</span>
+                        <div class="an-inline-progress"><div class="an-inline-fill-spend" style="width:${spendPctOfMax.toFixed(1)}%;"></div></div>
+                    </td>
+                </tr>
+            `;
+        })
+        .join("");
+}
+
 
 

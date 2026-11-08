@@ -86,13 +86,16 @@
                     </div>
                 </div>
 
-                <!-- SELETTORE SEZIONE PRINCIPALE: LISTA SPESA vs DATABASE ACQUISTI (Visibile solo su PC) -->
+                <!-- SELETTORE SEZIONE PRINCIPALE: LISTA SPESA vs DATABASE ACQUISTI vs ANALISI PRODOTTI (Visibile solo su PC) -->
                 <div class="main-nav-tabs pc-only">
                     <button type="button" id="nav-tab-list" class="main-nav-btn active" onclick="switchMainSection('list')">
                         🛒 Lista della Spesa
                     </button>
                     <button type="button" id="nav-tab-db" class="main-nav-btn" onclick="switchMainSection('db')">
                         📊 Mostra database (<span id="nav-db-count">0</span>)
+                    </button>
+                    <button type="button" id="nav-tab-analytics" class="main-nav-btn main-nav-btn-analytics" onclick="switchMainSection('analytics')">
+                        📈 Analisi Prodotti
                     </button>
                 </div>
 
@@ -131,6 +134,9 @@
                 </div>
 
                 <div class="list-buttons-group">
+                    <button type="button" id="btn-toolbar-show-analytics" class="btn btn-analytics-nav pc-only" onclick="switchMainSection('analytics')" title="Apri la scheda Analisi Prodotti e Grafici Avanzati (visibile solo su PC)">
+                        📈 Analisi Prodotti
+                    </button>
                     <button type="button" id="btn-toolbar-show-db" class="btn btn-show-db pc-only" onclick="switchMainSection('db')" title="Apri la Tabella Principale Acquisti (visibile solo su PC)">
                         📊 Mostra database
                     </button>
@@ -164,6 +170,9 @@
                     <button type="button" class="btn btn-show-db" onclick="switchMainSection('list')" title="Torna alla Lista della Spesa">
                         🛒 Mostra Lista
                     </button>
+                    <button type="button" class="btn btn-analytics-nav pc-only" onclick="switchMainSection('analytics')" title="Apri la scheda Analisi Prodotti e Grafici Avanzati">
+                        📈 Analisi Prodotti
+                    </button>
                     <button type="button" class="btn btn-secondary" onclick="openFornitoriModal()" title="Modifica elenco Fornitori (Aldi, Coop, Lidl, Migros)">
                         🏪 Fornitori
                     </button>
@@ -175,6 +184,24 @@
                     </button>
                     <button type="button" class="btn btn-accent" onclick="openAcquistoModal()">
                         ＋ Nuovo Acquisto
+                    </button>
+                </div>
+            </div>
+
+            <!-- BARRA GESTIONE ANALISI PRODOTTI (Visibile solo su PC nella sezione Analisi Prodotti) -->
+            <div id="analytics-header-toolbar" class="list-toolbar hidden pc-only">
+                <div class="db-toolbar-title">
+                    <span>📈 <strong>Intelligence & Analisi Prodotti (UI/UX Pro Max)</strong> — Grafici Avanzati, Prezzi, Volumi e Classifiche</span>
+                </div>
+                <div class="list-buttons-group">
+                    <button type="button" class="btn btn-show-db" onclick="switchMainSection('list')" title="Torna alla Lista della Spesa">
+                        🛒 Mostra Lista
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="switchMainSection('db')" title="Vai alla Tabella Database Acquisti">
+                        📊 Tabella Database
+                    </button>
+                    <button type="button" class="btn btn-primary" onclick="loadAnalyticsDashboard(true)" title="Ricarica e aggiorna i dati analitici">
+                        🔄 Aggiorna Analisi
                     </button>
                 </div>
             </div>
@@ -354,6 +381,299 @@
             <button type="button" class="fab-add" onclick="openAcquistoModal()" title="Registra nuovo acquisto">
                 ＋
             </button>
+        </div>
+
+        <!-- =============================================================== -->
+        <!-- SEZIONE 3: ANALISI PRODOTTI & GRAFICI AVANZATI (SOLO PC)         -->
+        <!-- =============================================================== -->
+        <div id="section-analytics" class="an-dashboard-wrapper hidden pc-only">
+            <!-- HERO BENTO KPI CARDS -->
+            <section class="an-kpi-bento">
+                <div class="an-kpi-card an-kpi-blue">
+                    <div class="an-kpi-icon-wrap">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                    </div>
+                    <div class="an-kpi-content">
+                        <span class="an-kpi-label">Spesa Totale Filtrata</span>
+                        <strong class="an-kpi-value" id="an-kpi-total-spend">0.00</strong>
+                        <span class="an-kpi-sub" id="an-kpi-spend-sub">CHF/€ complessivi</span>
+                    </div>
+                </div>
+
+                <div class="an-kpi-card an-kpi-purple">
+                    <div class="an-kpi-icon-wrap">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                    </div>
+                    <div class="an-kpi-content">
+                        <span class="an-kpi-label">Quantità Totale Acquistata</span>
+                        <strong class="an-kpi-value" id="an-kpi-total-qty">0</strong>
+                        <span class="an-kpi-sub" id="an-kpi-qty-sub">Unità / confezioni totali</span>
+                    </div>
+                </div>
+
+                <div class="an-kpi-card an-kpi-pink">
+                    <div class="an-kpi-icon-wrap">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                    </div>
+                    <div class="an-kpi-content">
+                        <span class="an-kpi-label">Prodotti & Prezzo Medio</span>
+                        <strong class="an-kpi-value" id="an-kpi-unique-products">0</strong>
+                        <span class="an-kpi-sub" id="an-kpi-avg-price-sub">Prezzo medio: 0.00</span>
+                    </div>
+                </div>
+
+                <div class="an-kpi-card an-kpi-emerald">
+                    <div class="an-kpi-icon-wrap">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></svg>
+                    </div>
+                    <div class="an-kpi-content">
+                        <span class="an-kpi-label">Top Prodotto #1</span>
+                        <strong class="an-kpi-value an-kpi-truncate" id="an-kpi-top-product">—</strong>
+                        <span class="an-kpi-sub" id="an-kpi-top-product-sub">—</span>
+                    </div>
+                </div>
+
+                <div class="an-kpi-card an-kpi-amber">
+                    <div class="an-kpi-icon-wrap">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                    </div>
+                    <div class="an-kpi-content">
+                        <span class="an-kpi-label">Top Fornitore & Reparto</span>
+                        <strong class="an-kpi-value an-kpi-truncate" id="an-kpi-top-supplier">—</strong>
+                        <span class="an-kpi-sub" id="an-kpi-top-cat-sub">—</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- COCKPIT DI FILTRAGGIO E ORDINAMENTO PERSONALIZZATO -->
+            <section class="an-cockpit-card">
+                <div class="an-cockpit-top">
+                    <div class="an-source-group">
+                        <label for="an-source-select" class="an-ctrl-label">📂 Fonte Dati:</label>
+                        <select id="an-source-select" class="an-select an-select-prominent" onchange="onAnalyticsControlChange()">
+                            <option value="combined">🔥 Storico Completo (Database + Liste Acquistate)</option>
+                            <option value="current_list">🛒 Solo Lista della Spesa Attiva</option>
+                            <option value="all_lists">📚 Tutte le Liste della Spesa</option>
+                            <option value="db_only">📊 Solo Tabella Principale Acquisti</option>
+                            <option value="catalog">📋 Intero Catalogo Prodotti (Prezzi Correnti)</option>
+                        </select>
+                    </div>
+
+                    <div class="an-metric-switch-group">
+                        <span class="an-ctrl-label">🎯 Metrica Grafici:</span>
+                        <div class="an-pill-switch">
+                            <button type="button" id="an-metric-btn-spend" class="an-pill-btn active" onclick="setAnalyticsPrimaryMetric('spend')">
+                                💶 Spesa Totale
+                            </button>
+                            <button type="button" id="an-metric-btn-qty" class="an-pill-btn" onclick="setAnalyticsPrimaryMetric('qty')">
+                                📦 Quantità
+                            </button>
+                            <button type="button" id="an-metric-btn-unit_price" class="an-pill-btn" onclick="setAnalyticsPrimaryMetric('unit_price')">
+                                🏷️ Prezzo Unitario
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="an-sort-group">
+                        <label for="an-sort-select" class="an-ctrl-label">🔃 Ordina Prodotti per:</label>
+                        <select id="an-sort-select" class="an-select an-select-prominent" onchange="onAnalyticsControlChange()">
+                            <option value="spend_desc">💶 Spesa Totale: Dal più alto ↓</option>
+                            <option value="spend_asc">💶 Spesa Totale: Dal più basso ↑</option>
+                            <option value="qty_desc">📦 Quantità Totale: Dalla più alta ↓</option>
+                            <option value="qty_asc">📦 Quantità Totale: Dalla più bassa ↑</option>
+                            <option value="unit_desc">🏷️ Prezzo Unitario Corrente: Dal più caro ↓</option>
+                            <option value="unit_asc">🏷️ Prezzo Unitario Corrente: Dal più economico ↑</option>
+                            <option value="avg_desc">📊 Prezzo Medio: Dal più alto ↓</option>
+                            <option value="freq_desc">🔄 Frequenza d'Acquisto: Più acquistati ↓</option>
+                            <option value="name_asc">🔤 Nome Prodotto: A → Z</option>
+                            <option value="name_desc">🔤 Nome Prodotto: Z → A</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="an-cockpit-filters">
+                    <div class="an-filter-box an-filter-search-box">
+                        <label for="an-search-input">🔍 Cerca Prodotto</label>
+                        <input type="search" id="an-search-input" placeholder="Es. Lamponi, Olio, Salmone..." oninput="onAnalyticsSearchInput(this.value)" />
+                    </div>
+
+                    <div class="an-filter-box">
+                        <label for="an-filter-category">🥗 Categoria</label>
+                        <select id="an-filter-category" onchange="onAnalyticsControlChange()">
+                            <option value="ALL">Tutte le categorie</option>
+                        </select>
+                    </div>
+
+                    <div class="an-filter-box">
+                        <label for="an-filter-supplier">🏪 Fornitore</label>
+                        <select id="an-filter-supplier" onchange="onAnalyticsControlChange()">
+                            <option value="ALL">Tutti i fornitori</option>
+                        </select>
+                    </div>
+
+                    <div class="an-filter-box">
+                        <label for="an-filter-year">📆 Anno</label>
+                        <select id="an-filter-year" onchange="onAnalyticsControlChange()">
+                            <option value="ALL">Tutti gli anni</option>
+                        </select>
+                    </div>
+
+                    <div class="an-filter-box">
+                        <label for="an-filter-month">🗓️ Mese</label>
+                        <select id="an-filter-month" onchange="onAnalyticsControlChange()">
+                            <option value="ALL">Tutti i mesi</option>
+                            <option value="01">01 — Gennaio</option>
+                            <option value="02">02 — Febbraio</option>
+                            <option value="03">03 — Marzo</option>
+                            <option value="04">04 — Aprile</option>
+                            <option value="05">05 — Maggio</option>
+                            <option value="06">06 — Giugno</option>
+                            <option value="07">07 — Luglio</option>
+                            <option value="08">08 — Agosto</option>
+                            <option value="09">09 — Settembre</option>
+                            <option value="10">10 — Ottobre</option>
+                            <option value="11">11 — Novembre</option>
+                            <option value="12">12 — Dicembre</option>
+                        </select>
+                    </div>
+
+                    <div class="an-filter-box an-filter-num">
+                        <label for="an-filter-min-price">💰 Prezzo Min</label>
+                        <input type="number" id="an-filter-min-price" step="0.1" min="0" placeholder="0.00" oninput="onAnalyticsControlChange()" />
+                    </div>
+
+                    <div class="an-filter-box an-filter-num">
+                        <label for="an-filter-max-price">💰 Prezzo Max</label>
+                        <input type="number" id="an-filter-max-price" step="0.1" min="0" placeholder="Max" oninput="onAnalyticsControlChange()" />
+                    </div>
+
+                    <div class="an-filter-box an-filter-num">
+                        <label for="an-filter-min-qty">📦 Q.tà Min</label>
+                        <input type="number" id="an-filter-min-qty" step="1" min="0" placeholder="0" oninput="onAnalyticsControlChange()" />
+                    </div>
+
+                    <div class="an-filter-actions">
+                        <button type="button" class="btn btn-an-reset" onclick="resetAnalyticsFilters()" title="Azzera tutti i filtri">
+                            ↺ Reset Filtri
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- BENTO GRID GRAFICI AVANZATI (4 PANNELLI INTERATTIVI) -->
+            <section class="an-charts-bento-grid">
+                <!-- GRAFICO 1: TOP PRODOTTI (BARRE ORIZZONTALI CON GRADIENTE & DETTAGLIO) -->
+                <div class="an-chart-card an-span-7">
+                    <div class="an-card-header">
+                        <div>
+                            <h3 class="an-card-title">🏆 Classifica Prodotti (Quantità vs Prezzo / Spesa)</h3>
+                            <p class="an-card-subtitle" id="an-top-chart-subtitle">Clicca su un prodotto per analizzarne lo storico prezzi e i fornitori</p>
+                        </div>
+                        <div class="an-card-controls">
+                            <label for="an-top-limit-select" class="an-mini-label">Mostra:</label>
+                            <select id="an-top-limit-select" class="an-mini-select" onchange="renderAnalyticsDashboard()">
+                                <option value="10">Top 10</option>
+                                <option value="15" selected>Top 15</option>
+                                <option value="25">Top 25</option>
+                                <option value="50">Top 50</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="an-chart-top-products" class="an-chart-stage an-top-bars-stage"></div>
+                </div>
+
+                <!-- GRAFICO 2: DONUT & RIPARTIZIONE CATEGORIE / FORNITORI -->
+                <div class="an-chart-card an-span-5">
+                    <div class="an-card-header">
+                        <div>
+                            <h3 class="an-card-title">🍩 Distribuzione per Categoria & Fornitore</h3>
+                            <p class="an-card-subtitle">Clicca su una categoria o su un fornitore per filtrare</p>
+                        </div>
+                        <div class="an-pill-switch an-pill-switch-sm">
+                            <button type="button" id="an-dist-btn-cat" class="an-pill-btn active" onclick="setAnalyticsDistMode('category')">
+                                Categorie
+                            </button>
+                            <button type="button" id="an-dist-btn-sup" class="an-pill-btn" onclick="setAnalyticsDistMode('supplier')">
+                                Fornitori
+                            </button>
+                        </div>
+                    </div>
+                    <div id="an-chart-distribution" class="an-chart-stage an-donut-stage"></div>
+                </div>
+
+                <!-- GRAFICO 3: MATRICE STRATEGICA QUANTITÀ vs PREZZO UNITARIO (BUBBLE SCATTER PLOT) -->
+                <div class="an-chart-card an-span-6">
+                    <div class="an-card-header">
+                        <div>
+                            <h3 class="an-card-title">🎯 Matrice Strategica: Quantità vs Prezzo Unitario</h3>
+                            <p class="an-card-subtitle">Asse X: Quantità Totale • Asse Y: Prezzo Unitario • Dimensione bolla: Spesa Totale</p>
+                        </div>
+                    </div>
+                    <div id="an-chart-scatter" class="an-chart-stage an-svg-chart-stage"></div>
+                </div>
+
+                <!-- GRAFICO 4: TREND TEMPORALE & STORICO PREZZO DEL PRODOTTO SELEZIONATO -->
+                <div class="an-chart-card an-span-6">
+                    <div class="an-card-header">
+                        <div>
+                            <h3 class="an-card-title" id="an-trend-chart-title">📈 Andamento Temporale Spesa & Volumi</h3>
+                            <p class="an-card-subtitle" id="an-trend-chart-subtitle">Evoluzione per data di acquisto (o storico prezzo del prodotto selezionato)</p>
+                        </div>
+                        <button type="button" id="an-clear-focus-product-btn" class="btn btn-xs btn-secondary hidden" onclick="setAnalyticsFocusProduct('')">
+                            ✕ Mostra Trend Globale
+                        </button>
+                    </div>
+                    <div id="an-chart-trend" class="an-chart-stage an-svg-chart-stage"></div>
+                </div>
+            </section>
+
+            <!-- LISTA / TABELLA ANALITICA INTERATTIVA DEI PRODOTTI -->
+            <section class="an-table-card">
+                <div class="an-table-card-header">
+                    <div>
+                        <h3 class="an-card-title">
+                            📋 Lista Analitica Prodotti (<span id="an-table-count">0</span> prodotti trovati)
+                        </h3>
+                        <p class="an-card-subtitle">
+                            Clicca sulle intestazioni delle colonne per ordinare rapidamente per Quantità, Prezzo Unitario, Prezzo Medio o Spesa Totale
+                        </p>
+                    </div>
+                    <div class="an-table-legend">
+                        <span class="an-legend-chip"><i class="an-dot an-dot-spend"></i> Barra Spesa</span>
+                        <span class="an-legend-chip"><i class="an-dot an-dot-qty"></i> Barra Quantità</span>
+                    </div>
+                </div>
+
+                <div class="an-table-scroll-wrap">
+                    <table class="an-products-table">
+                        <thead>
+                            <tr>
+                                <th style="width:54px;">#</th>
+                                <th class="an-sortable-th" onclick="toggleAnalyticsTableSort('name')">
+                                    Prodotto & Categoria <span id="an-sort-ind-name" class="an-sort-ind"></span>
+                                </th>
+                                <th>Fornitori & Prezzi per Negozio</th>
+                                <th class="num-col an-sortable-th" onclick="toggleAnalyticsTableSort('qty')">
+                                    Quantità Totale <span id="an-sort-ind-qty" class="an-sort-ind"></span>
+                                </th>
+                                <th class="num-col an-sortable-th" onclick="toggleAnalyticsTableSort('freq')">
+                                    Acquisti <span id="an-sort-ind-freq" class="an-sort-ind"></span>
+                                </th>
+                                <th class="num-col an-sortable-th" onclick="toggleAnalyticsTableSort('unit')">
+                                    Prezzo Corrente <span id="an-sort-ind-unit" class="an-sort-ind"></span>
+                                </th>
+                                <th class="num-col an-sortable-th" onclick="toggleAnalyticsTableSort('avg')">
+                                    Prezzo Medio (Min/Max) <span id="an-sort-ind-avg" class="an-sort-ind"></span>
+                                </th>
+                                <th class="num-col an-sortable-th" onclick="toggleAnalyticsTableSort('spend')">
+                                    Spesa Totale & Incidenza % <span id="an-sort-ind-spend" class="an-sort-ind"></span>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody id="an-products-tbody"></tbody>
+                    </table>
+                </div>
+            </section>
         </div>
     </div>
 

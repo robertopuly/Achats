@@ -2045,6 +2045,63 @@ async function handleRequest(req, res) {
             });
         }
 
+        if (pathname === "/api/analytics/products" && method === "GET") {
+            const acquistiRows = db
+                .prepare(
+                    `SELECT id, descrizione_prodotto, COALESCE(fornitore, 'Aldi') AS fornitore,
+                            COALESCE(categoria, 'ALIMENTARI') AS categoria, COALESCE(unita, 'Pz') AS unita,
+                            COALESCE(prezzo_unitario, 0) AS prezzo_unitario,
+                            COALESCE(quantita, 0) AS quantita,
+                            COALESCE(prezzo_totale, 0) AS prezzo_totale,
+                            data_acquisto, anno, mese, giorno, list_id, list_item_id, note
+                     FROM acquisti
+                     ORDER BY data_acquisto DESC, id DESC`
+                )
+                .all();
+
+            const listItemsRows = db
+                .prepare(
+                    `SELECT i.id AS item_id, i.list_id, i.name, i.category, i.unit, i.quantity,
+                            COALESCE(i.unit_price, 0) AS unit_price,
+                            COALESCE(i.total_price, 0) AS total_price,
+                            COALESCE(i.fornitore, l.fornitore, 'Aldi') AS fornitore,
+                            i.in_list, i.purchased, i.notes,
+                            l.name AS list_name, l.list_date
+                     FROM shopping_list_items i
+                     JOIN shopping_lists l ON l.id = i.list_id
+                     WHERE i.purchased = 1 OR i.in_list = 1 OR TRIM(COALESCE(i.quantity, '')) != '' OR COALESCE(i.unit_price, 0) > 0
+                     ORDER BY l.list_date DESC, i.id DESC`
+                )
+                .all();
+
+            const catalogRows = db
+                .prepare(
+                    `SELECT id, name, category, default_unit,
+                            COALESCE(last_unit_price, 0) AS last_unit_price,
+                            COALESCE(last_fornitore, 'Aldi') AS last_fornitore
+                     FROM catalog_products
+                     ORDER BY name COLLATE NOCASE ASC`
+                )
+                .all();
+
+            const supplierPricesRows = db
+                .prepare(
+                    `SELECT product_name, fornitore, COALESCE(unit_price, 0) AS unit_price, updated_at
+                     FROM supplier_product_prices
+                     WHERE COALESCE(unit_price, 0) > 0`
+                )
+                .all();
+
+            return sendJson(res, 200, {
+                acquisti: acquistiRows,
+                list_items: listItemsRows,
+                catalog: catalogRows,
+                supplier_prices: supplierPricesRows,
+                fornitori: getFornitoriList(),
+                categories: getOrderedCategories(),
+            });
+        }
+
         if (pathname === "/api/acquisti" && method === "POST") {
             const data = await readJsonBody(req);
             const descrizione_prodotto = String(data.descrizione_prodotto || "").trim();
