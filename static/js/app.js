@@ -534,7 +534,15 @@ async function refreshListsSummaryOnly() {
     }
 }
 
+let isSubmittingNewList = false;
+
 function openNewListModal() {
+    isSubmittingNewList = false;
+    const submitBtn = document.getElementById("btn-submit-new-list");
+    if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Crea Lista";
+    }
     document.getElementById("new-list-date").value = tomorrowISO();
     document.getElementById("new-list-name").value = "Lista Supermercato";
     document.getElementById("new-list-mode").value = "template";
@@ -543,6 +551,15 @@ function openNewListModal() {
 
 async function submitNewList(e) {
     e.preventDefault();
+    if (isSubmittingNewList) return;
+    isSubmittingNewList = true;
+
+    const submitBtn = document.getElementById("btn-submit-new-list");
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = "⏳ Creazione in corso...";
+    }
+
     const list_date = document.getElementById("new-list-date").value || tomorrowISO();
     const name = document.getElementById("new-list-name").value.trim() || "Lista Supermercato";
     const mode = document.getElementById("new-list-mode").value;
@@ -570,6 +587,12 @@ async function submitNewList(e) {
         showToast(`Nuova lista creata (${formatDateIT(list_date)})!`, "success");
     } catch (err) {
         showToast(err.message);
+    } finally {
+        isSubmittingNewList = false;
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = "Crea Lista";
+        }
     }
 }
 
