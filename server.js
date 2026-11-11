@@ -2290,9 +2290,13 @@ async function handleRequest(req, res) {
             const supplierPricesRows = db
                 .prepare(
                     `SELECT product_name, fornitore, COALESCE(unit_price, 0) AS unit_price, updated_at
-                     FROM supplier_product_prices
+                     FROM product_supplier_prices
                      WHERE COALESCE(unit_price, 0) > 0`
                 )
+                .all();
+
+            const categoriesRows = db
+                .prepare("SELECT id, name, icon, color, sort_order, column_group FROM categories ORDER BY sort_order ASC, name ASC")
                 .all();
 
             return sendJson(res, 200, {
@@ -2302,7 +2306,7 @@ async function handleRequest(req, res) {
                 supplier_prices: supplierPricesRows,
                 fornitori: getFornitoriList(),
                 settori: getSettoriList(),
-                categories: getOrderedCategories(),
+                categories: categoriesRows,
             });
         }
 
