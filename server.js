@@ -138,6 +138,29 @@ if (countFornitori === 0) {
     }
 }
 
+// 2B. Tabella Settori (precompilata con Cucina, Bar, Hotel, Cave à vin e modificabile)
+db.exec(`
+    CREATE TABLE IF NOT EXISTS settori (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nome TEXT UNIQUE NOT NULL COLLATE NOCASE,
+        sort_order INTEGER DEFAULT 10
+    );
+`);
+
+const DEFAULT_SETTORI = [
+    { nome: "Cucina", sort_order: 1 },
+    { nome: "Bar", sort_order: 2 },
+    { nome: "Hotel", sort_order: 3 },
+    { nome: "Cave à vin", sort_order: 4 },
+];
+const countSettori = db.prepare("SELECT COUNT(*) AS c FROM settori").get().c;
+if (countSettori === 0) {
+    const insSett = db.prepare("INSERT OR IGNORE INTO settori (nome, sort_order) VALUES (?, ?)");
+    for (const s of DEFAULT_SETTORI) {
+        insSett.run(s.nome, s.sort_order);
+    }
+}
+
 // 3. Tabella principale ACQUISTI
 db.exec(`
     CREATE TABLE IF NOT EXISTS acquisti (
@@ -184,8 +207,12 @@ ensureColumn("shopping_list_items", "same_day_updated_by_id", "INTEGER DEFAULT 0
 ensureColumn("shopping_list_items", "same_day_updated_at", "TEXT DEFAULT ''");
 ensureColumn("catalog_products", "last_unit_price", "REAL DEFAULT 0");
 ensureColumn("catalog_products", "last_fornitore", "TEXT DEFAULT ''");
+ensureColumn("catalog_products", "settore", "TEXT DEFAULT 'Cucina'");
+ensureColumn("shopping_list_items", "settore", "TEXT DEFAULT 'Cucina'");
+ensureColumn("acquisti", "settore", "TEXT DEFAULT 'Cucina'");
 
 db.exec("CREATE INDEX IF NOT EXISTS idx_acquisti_fornitore ON acquisti(fornitore);");
+db.exec("CREATE INDEX IF NOT EXISTS idx_acquisti_settore ON acquisti(settore);");
 
 // 4. Tabella prezzi per singolo (Prodotto + Fornitore) così ogni supermercato mantiene il suo prezzo reale
 db.exec(`
@@ -688,6 +715,16 @@ function ensureSupplierExists(nome) {
     return clean;
 }
 
+function ensureSettoreExists(nome) {
+    const clean = String(nome || "").trim();
+    if (!clean) return "Cucina";
+    const existing = db.prepare("SELECT nome FROM settori WHERE LOWER(nome) = LOWER(?)").get(clean);
+    if (existing) return existing.nome;
+    const maxOrd = db.prepare("SELECT COALESCE(MAX(sort_order), 0) AS m FROM settori").get().m;
+    db.prepare("INSERT OR IGNORE INTO settori (nome, sort_order) VALUES (?, ?)").run(clean, maxOrd + 1);
+    return clean;
+}
+
 function nowIso() {
     return new Date().toISOString().slice(0, 19);
 }
@@ -725,6 +762,7 @@ function syncListItemToAcquisti(item, parentList) {
     const listDate = parentList ? parentList.list_date : todayIso();
     const listFornitore = (parentList && parentList.fornitore) || "Aldi";
     const fornitore = ensureSupplierExists(item.fornitore || listFornitore || "Aldi");
+    const settore = ensureSettoreExists(item.settore || "Cucina");
     const { data_acquisto, anno, mese, giorno } = extractDateParts(listDate);
     const qtyNum = parseNumber(item.quantity, 1) || 1;
     const unitPriceNum = roundMoney(parseNumber(item.unit_price, 0));
@@ -745,12 +783,13 @@ function syncListItemToAcquisti(item, parentList) {
 
             db.prepare(
                 `UPDATE acquisti
-                 SET descrizione_prodotto = ?, fornitore = ?, categoria = ?, unita = ?, prezzo_unitario = ?, quantita = ?, prezzo_totale = ?,
+                 SET descrizione_prodotto = ?, fornitore = ?, settore = ?, categoria = ?, unita = ?, prezzo_unitario = ?, quantita = ?, prezzo_totale = ?,
                      list_id = ?, list_item_id = ?, data_acquisto = ?, anno = ?, mese = ?, giorno = ?, note = ?, updated_at = ?
                  WHERE id = ?`
             ).run(
                 item.name,
                 fornitore,
+                settore,
                 item.category || "ALIMENTARI",
                 item.unit || "Pz",
                 unitPriceNum,
@@ -769,12 +808,13 @@ function syncListItemToAcquisti(item, parentList) {
         } else {
             db.prepare(
                 `INSERT INTO acquisti
-                 (descrizione_prodotto, fornitore, categoria, unita, prezzo_unitario, quantita, prezzo_totale,
+                 (descrizione_prodotto, fornitore, settore, categoria, unita, prezzo_unitario, quantita, prezzo_totale,
                   data_acquisto, anno, mese, giorno, list_id, list_item_id, note, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             ).run(
                 item.name,
                 fornitore,
+                settore,
                 item.category || "ALIMENTARI",
                 item.unit || "Pz",
                 unitPriceNum,
@@ -953,6 +993,10 @@ function getFornitoriList() {
     return db.prepare("SELECT id, nome, sort_order FROM fornitori ORDER BY sort_order ASC, nome COLLATE NOCASE ASC").all();
 }
 
+function getSettoriList() {
+    return db.prepare("SELECT id, nome, sort_order FROM settori ORDER BY sort_order ASC, nome COLLATE NOCASE ASC").all();
+}
+
 function getFullShoppingList(listId) {
     const lst = db
         .prepare("SELECT id, name, list_date, COALESCE(fornitore, 'Aldi') AS fornitore, created_by, created_at, updated_at FROM shopping_lists WHERE id = ?")
@@ -962,10 +1006,12 @@ function getFullShoppingList(listId) {
         .prepare("SELECT id, name, icon, color, sort_order, column_group FROM categories ORDER BY sort_order ASC, name ASC")
         .all();
     const fornitori = getFornitoriList();
+    const settori = getSettoriList();
     const items = db
         .prepare(
             `SELECT id, list_id, product_id, name, category, unit, quantity, unit_price, total_price,
-                    COALESCE(fornitore, '') AS fornitore, in_list, purchased, notes,
+                    COALESCE(fornitore, '') AS fornitore, COALESCE(settore, 'Cucina') AS settore,
+                    in_list, purchased, notes,
                     COALESCE(same_day_alert, 0) AS same_day_alert,
                     COALESCE(same_day_updated_by, '') AS same_day_updated_by,
                     COALESCE(same_day_updated_by_id, 0) AS same_day_updated_by_id,
@@ -976,7 +1022,7 @@ function getFullShoppingList(listId) {
              ORDER BY name COLLATE NOCASE ASC`
         )
         .all(listId);
-    return { list: lst, categories, fornitori, items };
+    return { list: lst, categories, fornitori, settori, items };
 }
 
 function touchList(listId) {
@@ -1394,6 +1440,44 @@ async function handleRequest(req, res) {
             }
         }
 
+        // =====================================================================
+        // 3B. SETTORI API (Cucina, Bar, Hotel, Cave à vin + personalizzabili)
+        // =====================================================================
+        if (pathname === "/api/settori" && method === "GET") {
+            return sendJson(res, 200, getSettoriList());
+        }
+
+        if (pathname === "/api/settori" && method === "POST") {
+            const data = await readJsonBody(req);
+            const nome = String(data.nome || "").trim();
+            if (!nome) return sendJson(res, 400, { error: "Inserisci il nome del settore." });
+            ensureSettoreExists(nome);
+            return sendJson(res, 200, getSettoriList());
+        }
+
+        const settMatch = pathname.match(/^\/api\/settori\/(\d+)$/);
+        if (settMatch) {
+            const sId = Number(settMatch[1]);
+            const row = db.prepare("SELECT * FROM settori WHERE id = ?").get(sId);
+            if (!row) return sendJson(res, 404, { error: "Settore non trovato." });
+
+            if (method === "PUT") {
+                const data = await readJsonBody(req);
+                const newNome = String(data.nome || "").trim();
+                if (!newNome) return sendJson(res, 400, { error: "Inserisci il nome del settore." });
+                db.prepare("UPDATE settori SET nome = ? WHERE id = ?").run(newNome, sId);
+                db.prepare("UPDATE acquisti SET settore = ? WHERE LOWER(settore) = LOWER(?)").run(newNome, row.nome);
+                db.prepare("UPDATE shopping_list_items SET settore = ? WHERE LOWER(settore) = LOWER(?)").run(newNome, row.nome);
+                db.prepare("UPDATE catalog_products SET settore = ? WHERE LOWER(settore) = LOWER(?)").run(newNome, row.nome);
+                return sendJson(res, 200, getSettoriList());
+            }
+
+            if (method === "DELETE") {
+                db.prepare("DELETE FROM settori WHERE id = ?").run(sId);
+                return sendJson(res, 200, getSettoriList());
+            }
+        }
+
         // 4. CATEGORIES API
         if (pathname === "/api/categories" && method === "GET") {
             const rows = db
@@ -1497,18 +1581,19 @@ async function handleRequest(req, res) {
 
                 const insertItem = db.prepare(
                     `INSERT INTO shopping_list_items
-                     (list_id, product_id, name, category, unit, quantity, unit_price, total_price, fornitore, in_list, purchased, notes, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+                     (list_id, product_id, name, category, unit, quantity, unit_price, total_price, fornitore, settore, in_list, purchased, notes, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
                 );
 
                 if (mode === "copy" && copySourceList) {
                     const srcItems = db
                         .prepare(
-                            "SELECT product_id, name, category, unit, quantity, unit_price, total_price, fornitore, in_list FROM shopping_list_items WHERE list_id = ? ORDER BY category ASC, name COLLATE NOCASE ASC"
+                            "SELECT product_id, name, category, unit, quantity, unit_price, total_price, fornitore, COALESCE(settore, 'Cucina') AS settore, in_list FROM shopping_list_items WHERE list_id = ? ORDER BY category ASC, name COLLATE NOCASE ASC"
                         )
                         .all(copySourceList.id);
                     for (const it of srcItems) {
                         const itemForn = ensureSupplierExists(it.fornitore || "Aldi");
+                        const itemSettore = ensureSettoreExists(it.settore || "Cucina");
                         const directPrice = roundMoney(parseNumber(it.unit_price, 0));
                         const itemPrice = directPrice > 0 ? directPrice : getSupplierPrice(it.name, itemForn);
                         if (itemPrice > 0) saveSupplierPrice(it.name, itemForn, itemPrice);
@@ -1523,6 +1608,7 @@ async function handleRequest(req, res) {
                             itemPrice,
                             roundMoney(qtyNum * itemPrice),
                             itemForn,
+                            itemSettore,
                             it.in_list,
                             "",
                             ts
@@ -1534,13 +1620,14 @@ async function handleRequest(req, res) {
                     if (latestByDateList) {
                         const prevItems = db
                             .prepare(
-                                "SELECT product_id, name, category, unit, unit_price, fornitore FROM shopping_list_items WHERE list_id = ? ORDER BY id ASC"
+                                "SELECT product_id, name, category, unit, unit_price, fornitore, COALESCE(settore, 'Cucina') AS settore FROM shopping_list_items WHERE list_id = ? ORDER BY id ASC"
                             )
                             .all(latestByDateList.id);
                         for (const it of prevItems) {
                             const key = String(it.name || "").trim().toLowerCase();
                             if (!key) continue;
                             const itemForn = ensureSupplierExists(it.fornitore || "Aldi");
+                            const itemSettore = ensureSettoreExists(it.settore || "Cucina");
                             const directPrice = roundMoney(parseNumber(it.unit_price, 0));
                             const latestPriceForSupplier =
                                 directPrice > 0 ? directPrice : getSupplierPrice(it.name, itemForn);
@@ -1553,6 +1640,7 @@ async function handleRequest(req, res) {
                                 category: it.category || "ALIMENTARI",
                                 unit: it.unit || "",
                                 fornitore: itemForn,
+                                settore: itemSettore,
                                 unit_price: latestPriceForSupplier,
                             });
                         }
@@ -1560,7 +1648,7 @@ async function handleRequest(req, res) {
 
                     const prods = db
                         .prepare(
-                            "SELECT id, name, category, default_unit, COALESCE(last_unit_price, 0) AS last_unit_price, COALESCE(last_fornitore, '') AS last_fornitore FROM catalog_products ORDER BY category ASC, name COLLATE NOCASE ASC"
+                            "SELECT id, name, category, default_unit, COALESCE(last_unit_price, 0) AS last_unit_price, COALESCE(last_fornitore, '') AS last_fornitore, COALESCE(settore, 'Cucina') AS settore FROM catalog_products ORDER BY category ASC, name COLLATE NOCASE ASC"
                         )
                         .all();
                     for (const p of prods) {
@@ -1568,6 +1656,7 @@ async function handleRequest(req, res) {
                         if (!key) continue;
                         if (!mergedMap.has(key)) {
                             const itemForn = ensureSupplierExists(p.last_fornitore || "Aldi");
+                            const itemSettore = ensureSettoreExists(p.settore || "Cucina");
                             const latestPriceForSupplier =
                                 getSupplierPrice(p.name, itemForn) || roundMoney(parseNumber(p.last_unit_price, 0));
                             mergedMap.set(key, {
@@ -1576,6 +1665,7 @@ async function handleRequest(req, res) {
                                 category: p.category || "ALIMENTARI",
                                 unit: p.default_unit || "",
                                 fornitore: itemForn,
+                                settore: itemSettore,
                                 unit_price: latestPriceForSupplier,
                             });
                         }
@@ -1592,6 +1682,7 @@ async function handleRequest(req, res) {
                             entry.unit_price || 0,
                             0,
                             entry.fornitore,
+                            entry.settore || "Cucina",
                             0,
                             "",
                             ts
@@ -1721,12 +1812,12 @@ async function handleRequest(req, res) {
                     .map((r) => r.name.trim().toLowerCase())
             );
             const catalogProds = db
-                .prepare("SELECT id, name, category, default_unit, COALESCE(last_unit_price, 0) AS last_unit_price, COALESCE(last_fornitore, '') AS last_fornitore FROM catalog_products")
+                .prepare("SELECT id, name, category, default_unit, COALESCE(last_unit_price, 0) AS last_unit_price, COALESCE(last_fornitore, '') AS last_fornitore, COALESCE(settore, 'Cucina') AS settore FROM catalog_products")
                 .all();
             const insertItem = db.prepare(
                 `INSERT INTO shopping_list_items
-                 (list_id, product_id, name, category, unit, quantity, unit_price, total_price, fornitore, in_list, purchased, notes, updated_at)
-                 VALUES (?, ?, ?, ?, ?, '', ?, 0, ?, 0, 0, '', ?)`
+                 (list_id, product_id, name, category, unit, quantity, unit_price, total_price, fornitore, settore, in_list, purchased, notes, updated_at)
+                 VALUES (?, ?, ?, ?, ?, '', ?, 0, ?, ?, 0, 0, '', ?)`
             );
             const ts = nowIso();
             for (const p of catalogProds) {
@@ -1739,6 +1830,7 @@ async function handleRequest(req, res) {
                         p.default_unit,
                         p.last_unit_price || 0,
                         p.last_fornitore || lst?.fornitore || "Aldi",
+                        p.settore || "Cucina",
                         ts
                     );
                 }
@@ -1758,6 +1850,7 @@ async function handleRequest(req, res) {
             const unit = String(data.unit || "").trim();
             const quantity = String(data.quantity ?? "").trim();
             const fornitore = ensureSupplierExists(data.fornitore || parentList?.fornitore || "Aldi");
+            const settore = ensureSettoreExists(data.settore || "Cucina");
             const rawInputPrice = roundMoney(parseNumber(data.unit_price, 0));
             const unit_price = rawInputPrice > 0 ? rawInputPrice : roundMoney(getSupplierPrice(name, fornitore));
             const qtyNum = parseNumber(quantity, 0);
@@ -1781,12 +1874,12 @@ async function handleRequest(req, res) {
                 if (existingProd) {
                     productId = existingProd.id;
                     db.prepare(
-                        "UPDATE catalog_products SET category = ?, default_unit = ?, last_fornitore = ?, last_unit_price = CASE WHEN ? > 0 THEN ? ELSE last_unit_price END WHERE id = ?"
-                    ).run(category, unit, fornitore, unit_price, unit_price, productId);
+                        "UPDATE catalog_products SET category = ?, default_unit = ?, last_fornitore = ?, settore = ?, last_unit_price = CASE WHEN ? > 0 THEN ? ELSE last_unit_price END WHERE id = ?"
+                    ).run(category, unit, fornitore, settore, unit_price, unit_price, productId);
                 } else {
                     const pInfo = db
-                        .prepare("INSERT INTO catalog_products (name, category, default_unit, last_unit_price, last_fornitore, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-                        .run(name, category, unit, unit_price, fornitore, ts);
+                        .prepare("INSERT INTO catalog_products (name, category, default_unit, last_unit_price, last_fornitore, settore, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+                        .run(name, category, unit, unit_price, fornitore, settore, ts);
                     productId = Number(pInfo.lastInsertRowid);
                 }
             }
@@ -1801,8 +1894,8 @@ async function handleRequest(req, res) {
             const iInfo = db
                 .prepare(
                     `INSERT INTO shopping_list_items
-                     (list_id, product_id, name, category, unit, quantity, unit_price, total_price, fornitore, in_list, purchased, notes, same_day_alert, same_day_updated_by, same_day_updated_by_id, same_day_updated_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`
+                     (list_id, product_id, name, category, unit, quantity, unit_price, total_price, fornitore, settore, in_list, purchased, notes, same_day_alert, same_day_updated_by, same_day_updated_by_id, same_day_updated_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`
                 )
                 .run(
                     listId,
@@ -1814,6 +1907,7 @@ async function handleRequest(req, res) {
                     unit_price,
                     total_price,
                     fornitore,
+                    settore,
                     in_list,
                     notes,
                     same_day_alert,
@@ -1891,11 +1985,11 @@ async function handleRequest(req, res) {
                         .prepare("INSERT INTO shopping_lists (name, list_date, fornitore, created_by, created_at, updated_at) VALUES (?, ?, 'Aldi', ?, ?, ?)")
                         .run("Lista Supermercato", todayIso(), currentUser.id, ts, ts);
                     const newId = Number(info.lastInsertRowid);
-                    const prods = db.prepare("SELECT id, name, category, default_unit, COALESCE(last_unit_price, 0) AS last_unit_price FROM catalog_products").all();
+                    const prods = db.prepare("SELECT id, name, category, default_unit, COALESCE(last_unit_price, 0) AS last_unit_price, COALESCE(settore, 'Cucina') AS settore FROM catalog_products").all();
                     const ins = db.prepare(
-                        "INSERT INTO shopping_list_items (list_id, product_id, name, category, unit, quantity, unit_price, total_price, fornitore, in_list, purchased, notes, updated_at) VALUES (?, ?, ?, ?, ?, '', ?, 0, 'Aldi', 0, 0, '', ?)"
+                        "INSERT INTO shopping_list_items (list_id, product_id, name, category, unit, quantity, unit_price, total_price, fornitore, settore, in_list, purchased, notes, updated_at) VALUES (?, ?, ?, ?, ?, '', ?, 0, 'Aldi', ?, 0, 0, '', ?)"
                     );
-                    for (const p of prods) ins.run(newId, p.id, p.name, p.category, p.default_unit, p.last_unit_price || 0, ts);
+                    for (const p of prods) ins.run(newId, p.id, p.name, p.category, p.default_unit, p.last_unit_price || 0, p.settore || "Cucina", ts);
                     remaining = { id: newId };
                 }
                 return sendJson(res, 200, { deleted: true, next_list_id: remaining.id });
@@ -1923,6 +2017,11 @@ async function handleRequest(req, res) {
                     "fornitore" in data && String(data.fornitore || "").trim()
                         ? ensureSupplierExists(data.fornitore)
                         : oldFornitore;
+                const oldSettore = (item.settore || "Cucina").trim() || "Cucina";
+                const settore =
+                    "settore" in data && String(data.settore || "").trim()
+                        ? ensureSettoreExists(data.settore)
+                        : oldSettore;
 
                 const supplierChanged = fornitore.toLowerCase() !== oldFornitore.toLowerCase();
                 let unit_price = roundMoney(parseNumber(item.unit_price, 0));
@@ -2015,7 +2114,7 @@ async function handleRequest(req, res) {
 
                 db.prepare(
                     `UPDATE shopping_list_items
-                     SET name = ?, category = ?, unit = ?, quantity = ?, unit_price = ?, total_price = ?, fornitore = ?,
+                     SET name = ?, category = ?, unit = ?, quantity = ?, unit_price = ?, total_price = ?, fornitore = ?, settore = ?,
                          in_list = ?, purchased = ?, notes = ?,
                          same_day_alert = ?, same_day_updated_by = ?, same_day_updated_by_id = ?, same_day_updated_at = ?, updated_at = ?
                      WHERE id = ?`
@@ -2027,6 +2126,7 @@ async function handleRequest(req, res) {
                     unit_price,
                     total_price,
                     fornitore,
+                    settore,
                     in_list,
                     purchased,
                     notes,
@@ -2038,13 +2138,20 @@ async function handleRequest(req, res) {
                     itemId
                 );
 
-                if (item.product_id && ("name" in data || "category" in data || "unit" in data || "unit_price" in data || "fornitore" in data)) {
+                if (item.product_id && ("name" in data || "category" in data || "unit" in data || "unit_price" in data || "fornitore" in data || "settore" in data)) {
                     db.prepare(
                         `UPDATE catalog_products
-                         SET name = ?, category = ?, default_unit = ?, last_fornitore = ?,
+                         SET name = ?, category = ?, default_unit = ?, last_fornitore = ?, settore = ?,
                              last_unit_price = CASE WHEN ? > 0 THEN ? ELSE last_unit_price END
                          WHERE id = ?`
-                    ).run(name, category, unit, fornitore, unit_price, unit_price, item.product_id);
+                    ).run(name, category, unit, fornitore, settore, unit_price, unit_price, item.product_id);
+                }
+
+                // Se viene modificato il Settore nel modale prodotto, propaga il Settore al catalogo, alle altre liste e al Database Acquisti per questo prodotto
+                if ("settore" in data) {
+                    db.prepare("UPDATE catalog_products SET settore = ? WHERE LOWER(name) = LOWER(?)").run(settore, name);
+                    db.prepare("UPDATE shopping_list_items SET settore = ? WHERE LOWER(name) = LOWER(?)").run(settore, name);
+                    db.prepare("UPDATE acquisti SET settore = ?, updated_at = ? WHERE LOWER(descrizione_prodotto) = LOWER(?)").run(settore, ts, name);
                 }
 
                 touchList(item.list_id);
@@ -2067,13 +2174,14 @@ async function handleRequest(req, res) {
         }
 
         // =====================================================================
-        // 6. TABELLA PRINCIPALE ACQUISTI API (Descrizione, Fornitore, Prezzo unitario, Quantità, Prezzo totale, Data, Anno/Mese/Giorno)
+        // 6. TABELLA PRINCIPALE ACQUISTI API (Descrizione, Fornitore, Settore, Prezzo unitario, Quantità, Prezzo totale, Data, Anno/Mese/Giorno)
         // =====================================================================
         if (pathname === "/api/acquisti" && method === "GET") {
             const filterAnno = (urlObj.searchParams.get("anno") || "").trim();
             const filterMese = (urlObj.searchParams.get("mese") || "").trim();
             const filterGiorno = (urlObj.searchParams.get("giorno") || "").trim();
             const filterFornitore = (urlObj.searchParams.get("fornitore") || "").trim();
+            const filterSettore = (urlObj.searchParams.get("settore") || "").trim();
             const q = (urlObj.searchParams.get("q") || "").trim().toLowerCase();
 
             const clauses = [];
@@ -2099,15 +2207,20 @@ async function handleRequest(req, res) {
                 clauses.push("LOWER(fornitore) = LOWER(?)");
                 params.push(filterFornitore);
             }
+            if (filterSettore) {
+                clauses.push("LOWER(COALESCE(settore, 'Cucina')) = LOWER(?)");
+                params.push(filterSettore);
+            }
             if (q) {
-                clauses.push("(LOWER(descrizione_prodotto) LIKE ? OR LOWER(categoria) LIKE ? OR LOWER(fornitore) LIKE ?)");
-                params.push(`%${q}%`, `%${q}%`, `%${q}%`);
+                clauses.push("(LOWER(descrizione_prodotto) LIKE ? OR LOWER(categoria) LIKE ? OR LOWER(fornitore) LIKE ? OR LOWER(COALESCE(settore, 'Cucina')) LIKE ?)");
+                params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
             }
 
             const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
             const rows = db
                 .prepare(
-                    `SELECT id, descrizione_prodotto, COALESCE(fornitore, 'Aldi') AS fornitore, categoria, unita,
+                    `SELECT id, descrizione_prodotto, COALESCE(fornitore, 'Aldi') AS fornitore,
+                            COALESCE(settore, 'Cucina') AS settore, categoria, unita,
                             prezzo_unitario, quantita, prezzo_totale,
                             data_acquisto, anno, mese, giorno, list_id, list_item_id, note, created_at, updated_at
                      FROM acquisti
@@ -2119,13 +2232,14 @@ async function handleRequest(req, res) {
             const availableYears = db.prepare("SELECT DISTINCT anno FROM acquisti ORDER BY anno DESC").all().map((r) => r.anno);
             const catalogSuggestions = db
                 .prepare(
-                    "SELECT name, category, default_unit, COALESCE(last_unit_price, 0) AS last_unit_price, COALESCE(last_fornitore, 'Aldi') AS last_fornitore FROM catalog_products ORDER BY name COLLATE NOCASE ASC"
+                    "SELECT name, category, default_unit, COALESCE(last_unit_price, 0) AS last_unit_price, COALESCE(last_fornitore, 'Aldi') AS last_fornitore, COALESCE(settore, 'Cucina') AS settore FROM catalog_products ORDER BY name COLLATE NOCASE ASC"
                 )
                 .all();
 
             return sendJson(res, 200, {
                 items: rows,
                 fornitori: getFornitoriList(),
+                settori: getSettoriList(),
                 available_years: availableYears,
                 catalog_suggestions: catalogSuggestions,
             });
@@ -2135,6 +2249,7 @@ async function handleRequest(req, res) {
             const acquistiRows = db
                 .prepare(
                     `SELECT id, descrizione_prodotto, COALESCE(fornitore, 'Aldi') AS fornitore,
+                            COALESCE(settore, 'Cucina') AS settore,
                             COALESCE(categoria, 'ALIMENTARI') AS categoria, COALESCE(unita, 'Pz') AS unita,
                             COALESCE(prezzo_unitario, 0) AS prezzo_unitario,
                             COALESCE(quantita, 0) AS quantita,
@@ -2151,6 +2266,7 @@ async function handleRequest(req, res) {
                             COALESCE(i.unit_price, 0) AS unit_price,
                             COALESCE(i.total_price, 0) AS total_price,
                             COALESCE(i.fornitore, l.fornitore, 'Aldi') AS fornitore,
+                            COALESCE(i.settore, 'Cucina') AS settore,
                             i.in_list, i.purchased, i.notes,
                             l.name AS list_name, l.list_date
                      FROM shopping_list_items i
@@ -2164,7 +2280,8 @@ async function handleRequest(req, res) {
                 .prepare(
                     `SELECT id, name, category, default_unit,
                             COALESCE(last_unit_price, 0) AS last_unit_price,
-                            COALESCE(last_fornitore, 'Aldi') AS last_fornitore
+                            COALESCE(last_fornitore, 'Aldi') AS last_fornitore,
+                            COALESCE(settore, 'Cucina') AS settore
                      FROM catalog_products
                      ORDER BY name COLLATE NOCASE ASC`
                 )
@@ -2184,6 +2301,7 @@ async function handleRequest(req, res) {
                 catalog: catalogRows,
                 supplier_prices: supplierPricesRows,
                 fornitori: getFornitoriList(),
+                settori: getSettoriList(),
                 categories: getOrderedCategories(),
             });
         }
@@ -2195,6 +2313,7 @@ async function handleRequest(req, res) {
                 return sendJson(res, 400, { error: "Inserisci la descrizione del prodotto." });
             }
             const fornitore = ensureSupplierExists(data.fornitore || "Aldi");
+            const settore = ensureSettoreExists(data.settore || "Cucina");
             const categoria = String(data.categoria || "ALIMENTARI").trim().toUpperCase();
             const unita = String(data.unita || "Pz").trim();
             const prezzo_unitario = roundMoney(parseNumber(data.prezzo_unitario, 0));
@@ -2207,13 +2326,14 @@ async function handleRequest(req, res) {
             const info = db
                 .prepare(
                     `INSERT INTO acquisti
-                     (descrizione_prodotto, fornitore, categoria, unita, prezzo_unitario, quantita, prezzo_totale,
+                     (descrizione_prodotto, fornitore, settore, categoria, unita, prezzo_unitario, quantita, prezzo_totale,
                       data_acquisto, anno, mese, giorno, list_id, list_item_id, note, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)`
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)`
                 )
                 .run(
                     descrizione_prodotto,
                     fornitore,
+                    settore,
                     categoria,
                     unita,
                     prezzo_unitario,
@@ -2229,8 +2349,9 @@ async function handleRequest(req, res) {
                 );
 
             db.prepare(
-                "UPDATE catalog_products SET last_fornitore = ?, last_unit_price = CASE WHEN ? > 0 THEN ? ELSE last_unit_price END WHERE LOWER(name) = LOWER(?)"
-            ).run(fornitore, prezzo_unitario, prezzo_unitario, descrizione_prodotto);
+                "UPDATE catalog_products SET last_fornitore = ?, settore = ?, last_unit_price = CASE WHEN ? > 0 THEN ? ELSE last_unit_price END WHERE LOWER(name) = LOWER(?)"
+            ).run(fornitore, settore, prezzo_unitario, prezzo_unitario, descrizione_prodotto);
+            db.prepare("UPDATE shopping_list_items SET settore = ? WHERE LOWER(name) = LOWER(?)").run(settore, descrizione_prodotto);
             saveSupplierPrice(descrizione_prodotto, fornitore, prezzo_unitario);
 
             const created = db.prepare("SELECT * FROM acquisti WHERE id = ?").get(Number(info.lastInsertRowid));
@@ -2260,6 +2381,7 @@ async function handleRequest(req, res) {
                 const unitPriceNum = roundMoney(parseNumber(item.unit_price, 0));
                 const totalPriceNum = roundMoney(qtyNum * unitPriceNum);
                 const itemFornitore = ensureSupplierExists(item.fornitore || defaultFornitore);
+                const itemSettore = ensureSettoreExists(item.settore || "Cucina");
 
                 const existing = db
                     .prepare(
@@ -2272,12 +2394,13 @@ async function handleRequest(req, res) {
                     ).run(item.id, listId, item.name, existing.id);
                     db.prepare(
                         `UPDATE acquisti
-                         SET descrizione_prodotto = ?, fornitore = ?, categoria = ?, unita = ?, prezzo_unitario = ?, quantita = ?, prezzo_totale = ?,
+                         SET descrizione_prodotto = ?, fornitore = ?, settore = ?, categoria = ?, unita = ?, prezzo_unitario = ?, quantita = ?, prezzo_totale = ?,
                              list_id = ?, list_item_id = ?, data_acquisto = ?, anno = ?, mese = ?, giorno = ?, note = ?, updated_at = ?
                          WHERE id = ?`
                     ).run(
                         item.name,
                         itemFornitore,
+                        itemSettore,
                         item.category || "ALIMENTARI",
                         item.unit || "Pz",
                         unitPriceNum,
@@ -2296,12 +2419,13 @@ async function handleRequest(req, res) {
                 } else {
                     db.prepare(
                         `INSERT INTO acquisti
-                         (descrizione_prodotto, fornitore, categoria, unita, prezzo_unitario, quantita, prezzo_totale,
+                         (descrizione_prodotto, fornitore, settore, categoria, unita, prezzo_unitario, quantita, prezzo_totale,
                           data_acquisto, anno, mese, giorno, list_id, list_item_id, note, created_at, updated_at)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
                     ).run(
                         item.name,
                         itemFornitore,
+                        itemSettore,
                         item.category || "ALIMENTARI",
                         item.unit || "Pz",
                         unitPriceNum,
@@ -2329,6 +2453,7 @@ async function handleRequest(req, res) {
             const filterMese = (urlObj.searchParams.get("mese") || "").trim();
             const filterGiorno = (urlObj.searchParams.get("giorno") || "").trim();
             const filterFornitore = (urlObj.searchParams.get("fornitore") || "").trim();
+            const filterSettore = (urlObj.searchParams.get("settore") || "").trim();
             const groupBy = (urlObj.searchParams.get("group_by") || "day").trim();
             const q = (urlObj.searchParams.get("q") || "").trim().toLowerCase();
 
@@ -2355,9 +2480,13 @@ async function handleRequest(req, res) {
                 clauses.push("LOWER(fornitore) = LOWER(?)");
                 params.push(filterFornitore);
             }
+            if (filterSettore) {
+                clauses.push("LOWER(COALESCE(settore, 'Cucina')) = LOWER(?)");
+                params.push(filterSettore);
+            }
             if (q) {
-                clauses.push("(LOWER(descrizione_prodotto) LIKE ? OR LOWER(categoria) LIKE ? OR LOWER(fornitore) LIKE ?)");
-                params.push(`%${q}%`, `%${q}%`, `%${q}%`);
+                clauses.push("(LOWER(descrizione_prodotto) LIKE ? OR LOWER(categoria) LIKE ? OR LOWER(fornitore) LIKE ? OR LOWER(COALESCE(settore, 'Cucina')) LIKE ?)");
+                params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
             }
 
             const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
@@ -2405,6 +2534,10 @@ async function handleRequest(req, res) {
                     "fornitore" in data && String(data.fornitore || "").trim()
                         ? ensureSupplierExists(data.fornitore)
                         : row.fornitore || "Aldi";
+                const settore =
+                    "settore" in data && String(data.settore || "").trim()
+                        ? ensureSettoreExists(data.settore)
+                        : row.settore || "Cucina";
                 const categoria =
                     ("categoria" in data ? String(data.categoria).trim().toUpperCase() : row.categoria) || "ALIMENTARI";
                 const unita = "unita" in data ? String(data.unita).trim() : row.unita;
@@ -2419,12 +2552,13 @@ async function handleRequest(req, res) {
 
                 db.prepare(
                     `UPDATE acquisti
-                     SET descrizione_prodotto = ?, fornitore = ?, categoria = ?, unita = ?, prezzo_unitario = ?, quantita = ?, prezzo_totale = ?,
+                     SET descrizione_prodotto = ?, fornitore = ?, settore = ?, categoria = ?, unita = ?, prezzo_unitario = ?, quantita = ?, prezzo_totale = ?,
                          data_acquisto = ?, anno = ?, mese = ?, giorno = ?, note = ?, updated_at = ?
                      WHERE id = ?`
                 ).run(
                     descrizione_prodotto,
                     fornitore,
+                    settore,
                     categoria,
                     unita,
                     prezzo_unitario,
@@ -2441,12 +2575,15 @@ async function handleRequest(req, res) {
 
                 if (row.list_item_id) {
                     db.prepare(
-                        "UPDATE shopping_list_items SET fornitore = ?, unit_price = ?, total_price = ?, notes = ?, updated_at = ? WHERE id = ?"
-                    ).run(fornitore, prezzo_unitario, prezzo_totale, note, ts, row.list_item_id);
+                        "UPDATE shopping_list_items SET fornitore = ?, settore = ?, unit_price = ?, total_price = ?, notes = ?, updated_at = ? WHERE id = ?"
+                    ).run(fornitore, settore, prezzo_unitario, prezzo_totale, note, ts, row.list_item_id);
+                }
+                if ("settore" in data) {
+                    db.prepare("UPDATE shopping_list_items SET settore = ? WHERE LOWER(name) = LOWER(?)").run(settore, descrizione_prodotto);
                 }
                 db.prepare(
-                    "UPDATE catalog_products SET last_fornitore = ?, last_unit_price = CASE WHEN ? > 0 THEN ? ELSE last_unit_price END WHERE LOWER(name) = LOWER(?)"
-                ).run(fornitore, prezzo_unitario, prezzo_unitario, descrizione_prodotto);
+                    "UPDATE catalog_products SET last_fornitore = ?, settore = ?, last_unit_price = CASE WHEN ? > 0 THEN ? ELSE last_unit_price END WHERE LOWER(name) = LOWER(?)"
+                ).run(fornitore, settore, prezzo_unitario, prezzo_unitario, descrizione_prodotto);
                 saveSupplierPrice(descrizione_prodotto, fornitore, prezzo_unitario);
 
                 const updated = db.prepare("SELECT * FROM acquisti WHERE id = ?").get(acqId);

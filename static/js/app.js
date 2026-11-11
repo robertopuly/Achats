@@ -15,6 +15,12 @@ const state = {
         { id: 3, nome: "Lidl" },
         { id: 4, nome: "Migros" },
     ],
+    settori: [
+        { id: 1, nome: "Cucina" },
+        { id: 2, nome: "Bar" },
+        { id: 3, nome: "Hotel" },
+        { id: 4, nome: "Cave à vin" },
+    ],
     items: [],
     filterMode: "all",       // 'all' | 'active' | 'purchased'
     selectedCategory: "ALL", // 'ALL' oppure nome categoria (es. 'VERDURA')
@@ -25,11 +31,12 @@ const state = {
 
     // Stato Sezione Database Principale Acquisti
     acquisti: [],
-    dbGroupBy: "day",        // 'day' | 'month' | 'year' | 'supplier' | 'product' | 'none'
+    dbGroupBy: "day",        // 'day' | 'month' | 'year' | 'supplier' | 'settore' | 'product' | 'none'
     dbFilterYear: "",
     dbFilterMonth: "",
     dbFilterDate: "",
     dbFilterSupplier: "",
+    dbFilterSettore: "",
     dbSearchQuery: "",
     availableYears: [],
     catalogSuggestions: [],
@@ -255,6 +262,7 @@ async function enterApp() {
     updateRobertoMediaButtonVisibility();
 
     await loadFornitoriList();
+    await loadSettoriList();
     await loadListsAndSelectLatest();
     await loadAcquistiDatabase();
     await checkPendingMediaPopups();
@@ -394,6 +402,138 @@ async function addNewFornitoreFromModal(e) {
 }
 
 // ============================================================================
+// GESTIONE ELENCO SETTORI (Cucina, Bar, Hotel, Cave à vin + modificabili)
+// ============================================================================
+async function loadSettoriList() {
+    try {
+        const list = await apiFetch("/api/settori");
+        if (Array.isArray(list) && list.length > 0) {
+            state.settori = list;
+        }
+        renderAllSettoriSelects();
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+function getSettoriNames(extraName = "") {
+    const names = (state.settori || []).map((s) => s.nome);
+    if (extraName && !names.some((n) => n.toLowerCase() === extraName.toLowerCase())) {
+        names.push(extraName);
+    }
+    if (names.length === 0) {
+        return ["Cucina", "Bar", "Hotel", "Cave à vin"];
+    }
+    return names;
+}
+
+function renderAllSettoriSelects() {
+    // 1. Filtro settore nella barra Database Acquisti (PC)
+    const dbFilterSel = document.getElementById("db-filter-settore");
+    if (dbFilterSel) {
+        const currentFilter = state.dbFilterSettore || "";
+        const names = getSettoriNames(currentFilter);
+        dbFilterSel.innerHTML = `<option value="">Tutti i settori</option>`;
+        for (const n of names) {
+            const opt = document.createElement("option");
+            opt.value = n;
+            opt.textContent = n;
+            if (currentFilter && n.toLowerCase() === currentFilter.toLowerCase()) opt.selected = true;
+            dbFilterSel.appendChild(opt);
+        }
+    }
+
+    // 2. Se il modale Modifica Prodotto è aperto, aggiorna la tendina Settore mantenendo il valore selezionato
+    const prodSettSel = document.getElementById("prod-settore");
+    if (prodSettSel && prodSettSel.options.length > 0) {
+        const currentVal = prodSettSel.value && prodSettSel.value !== "__NEW__" ? prodSettSel.value : "Cucina";
+        populateProductSettoreSelect(currentVal);
+    }
+
+    // 3. Se il modale Acquisto è aperto, aggiorna la tendina Settore mantenendo il valore selezionato
+    const acqSettSel = document.getElementById("acq-settore-select");
+    if (acqSettSel && acqSettSel.options.length > 0) {
+        const currentVal = acqSettSel.value && acqSettSel.value !== "__CUSTOM__" ? acqSettSel.value : "Cucina";
+        populateAcqModalSettoreSelect(currentVal);
+    }
+}
+
+function openSettoriModal() {
+    renderSettoriManageModalList();
+    const inp = document.getElementById("new-settore-input");
+    if (inp) inp.value = "";
+    openModal("modal-settori");
+}
+
+function renderSettoriManageModalList() {
+    const container = document.getElementById("settori-manage-list");
+    if (!container) return;
+    container.innerHTML = "";
+
+    for (const s of state.settori) {
+        const row = document.createElement("div");
+        row.className = "fornitore-manage-row";
+        row.innerHTML = `
+            <input type="text" value="${escapeHtmlAttr(s.nome)}" data-sett-id="${s.id}" />
+            <button type="button" class="btn btn-primary btn-sm" data-act="save">Salva</button>
+            <button type="button" class="btn btn-danger btn-sm" data-act="del">🗑</button>
+        `;
+        const inp = row.querySelector("input");
+        row.querySelector('[data-act="save"]').addEventListener("click", async () => {
+            const newName = inp.value.trim();
+            if (!newName) return;
+            try {
+                state.settori = await apiFetch(`/api/settori/${s.id}`, {
+                    method: "PUT",
+                    body: JSON.stringify({ nome: newName }),
+                });
+                renderSettoriManageModalList();
+                renderAllSettoriSelects();
+                if (state.activeSection === "db") await loadAcquistiDatabase();
+                else if (state.activeSection === "analytics") await loadAnalyticsDashboard();
+                else if (state.currentList) await loadSingleList(state.currentList.id);
+                showToast(`Settore aggiornato in "${newName}"!`, "success");
+            } catch (err) {
+                showToast(err.message);
+            }
+        });
+        row.querySelector('[data-act="del"]').addEventListener("click", async () => {
+            if (!confirm(`Vuoi rimuovere "${s.nome}" dall'elenco settori?`)) return;
+            try {
+                state.settori = await apiFetch(`/api/settori/${s.id}`, { method: "DELETE" });
+                renderSettoriManageModalList();
+                renderAllSettoriSelects();
+                showToast(`Settore "${s.nome}" rimosso.`);
+            } catch (err) {
+                showToast(err.message);
+            }
+        });
+        container.appendChild(row);
+    }
+}
+
+async function addNewSettoreFromModal(e) {
+    e.preventDefault();
+    const inp = document.getElementById("new-settore-input");
+    const nome = inp.value.trim();
+    if (!nome) return;
+    try {
+        state.settori = await apiFetch("/api/settori", {
+            method: "POST",
+            body: JSON.stringify({ nome }),
+        });
+        inp.value = "";
+        renderSettoriManageModalList();
+        renderAllSettoriSelects();
+        populateProductSettoreSelect(nome);
+        populateAcqModalSettoreSelect(nome);
+        showToast(`Settore "${nome}" aggiunto!`, "success");
+    } catch (err) {
+        showToast(err.message);
+    }
+}
+
+// ============================================================================
 // NAVIGAZIONE TRA "LISTA DELLA SPESA", "DATABASE ACQUISTI" E "ANALISI PRODOTTI"
 // ============================================================================
 async function switchMainSection(section) {
@@ -480,6 +620,9 @@ async function loadSingleList(listId) {
     if (Array.isArray(data.fornitori) && data.fornitori.length > 0) {
         state.fornitori = data.fornitori;
     }
+    if (Array.isArray(data.settori) && data.settori.length > 0) {
+        state.settori = data.settori;
+    }
     state.items = data.items;
 
     const sel = document.getElementById("list-select");
@@ -489,6 +632,7 @@ async function loadSingleList(listId) {
     if (dateInput) dateInput.value = state.currentList.list_date;
 
     renderAllFornitoriSelects();
+    renderAllSettoriSelects();
     renderAll();
     checkAndShowSameDayAlertPopup(state.items);
 }
@@ -1493,6 +1637,32 @@ function populateProductFornitoreSelect(selectedForn = "Aldi") {
     document.getElementById("prod-new-fornitore-group").classList.add("hidden");
 }
 
+function populateProductSettoreSelect(selectedSettore = "Cucina") {
+    const sel = document.getElementById("prod-settore");
+    if (!sel) return;
+    sel.innerHTML = "";
+
+    const cleanTarget = String(selectedSettore || "Cucina").trim() || "Cucina";
+    const names = getSettoriNames(cleanTarget);
+    for (const n of names) {
+        const opt = document.createElement("option");
+        opt.value = n;
+        opt.textContent = n;
+        if (n.toLowerCase() === cleanTarget.toLowerCase()) opt.selected = true;
+        sel.appendChild(opt);
+    }
+
+    const newOpt = document.createElement("option");
+    newOpt.value = "__NEW__";
+    newOpt.textContent = "＋ Nuovo Settore...";
+    sel.appendChild(newOpt);
+
+    const grp = document.getElementById("prod-new-settore-group");
+    if (grp) grp.classList.add("hidden");
+    const inp = document.getElementById("prod-new-settore");
+    if (inp) inp.value = "";
+}
+
 function onProdCategorySelectChange(val) {
     const grp = document.getElementById("new-category-group");
     if (val === "__NEW__") {
@@ -1508,6 +1678,17 @@ function onProdFornitoreSelectChange(val) {
     if (val === "__NEW__") {
         grp.classList.remove("hidden");
         document.getElementById("prod-new-fornitore").focus();
+    } else {
+        grp.classList.add("hidden");
+    }
+}
+
+function onProdSettoreSelectChange(val) {
+    const grp = document.getElementById("prod-new-settore-group");
+    if (!grp) return;
+    if (val === "__NEW__") {
+        grp.classList.remove("hidden");
+        document.getElementById("prod-new-settore")?.focus();
     } else {
         grp.classList.add("hidden");
     }
@@ -1530,6 +1711,7 @@ function openAddProductModal(prefillName = "", prefillCategory = "") {
         (state.selectedCategory !== "ALL" ? state.selectedCategory : "ALIMENTARI");
     populateCategorySelect(defaultCat);
     populateProductFornitoreSelect(state.currentList?.fornitore || "Aldi");
+    populateProductSettoreSelect("Cucina");
     openModal("modal-product");
     setTimeout(() => document.getElementById("prod-name").focus(), 60);
 }
@@ -1550,6 +1732,7 @@ function openEditProductModal(itemId) {
 
     populateCategorySelect(item.category || "ALIMENTARI");
     populateProductFornitoreSelect(item.fornitore || state.currentList?.fornitore || "Aldi");
+    populateProductSettoreSelect(item.settore || "Cucina");
     openModal("modal-product");
 }
 
@@ -1565,6 +1748,10 @@ async function submitProductModal(e) {
     const newFornName = document.getElementById("prod-new-fornitore").value.trim();
     const fornitore = fornSelect === "__NEW__" ? newFornName || "Aldi" : fornSelect;
 
+    const settSelect = document.getElementById("prod-settore")?.value || "Cucina";
+    const newSettName = (document.getElementById("prod-new-settore")?.value || "").trim();
+    const settore = settSelect === "__NEW__" ? newSettName || "Cucina" : settSelect;
+
     const quantity = document.getElementById("prod-quantity").value.trim();
     const unit = document.getElementById("prod-unit").value.trim();
     const unit_price = parseFloat(document.getElementById("prod-unit-price").value || "0") || 0;
@@ -1577,15 +1764,21 @@ async function submitProductModal(e) {
         if (editId) {
             const updated = await apiFetch(`/api/items/${editId}`, {
                 method: "PUT",
-                body: JSON.stringify({ name, category, fornitore, quantity, unit, unit_price, notes }),
+                body: JSON.stringify({ name, category, fornitore, settore, quantity, unit, unit_price, notes }),
             });
             const idx = state.items.findIndex((i) => i.id === Number(editId));
             if (idx !== -1) state.items[idx] = updated;
+            // Allinea il settore per eventuali voci con lo stesso nome in memoria
+            state.items.forEach((it) => {
+                if (String(it.name || "").toLowerCase() === name.toLowerCase()) {
+                    it.settore = updated.settore || settore;
+                }
+            });
             showToast(`Prodotto "${name}" aggiornato!`, "success");
         } else {
             const created = await apiFetch(`/api/lists/${state.currentList.id}/items`, {
                 method: "POST",
-                body: JSON.stringify({ name, category, fornitore, quantity, unit, unit_price, notes, save_to_catalog }),
+                body: JSON.stringify({ name, category, fornitore, settore, quantity, unit, unit_price, notes, save_to_catalog }),
             });
             state.items.push(created);
             showToast(`Prodotto "${name}" aggiunto alla lista!`, "success");
@@ -1593,6 +1786,7 @@ async function submitProductModal(e) {
 
         state.categories = await apiFetch("/api/categories");
         await loadFornitoriList();
+        await loadSettoriList();
         closeModal("modal-product");
         renderAll();
         refreshListsSummaryOnly();
@@ -1645,12 +1839,16 @@ async function loadAcquistiDatabase() {
         if (state.dbFilterMonth) params.set("mese", state.dbFilterMonth);
         if (state.dbFilterDate) params.set("giorno", state.dbFilterDate);
         if (state.dbFilterSupplier) params.set("fornitore", state.dbFilterSupplier);
+        if (state.dbFilterSettore) params.set("settore", state.dbFilterSettore);
         if (state.dbSearchQuery) params.set("q", state.dbSearchQuery);
 
         const data = await apiFetch(`/api/acquisti?${params.toString()}`);
         state.acquisti = data.items || [];
         if (Array.isArray(data.fornitori) && data.fornitori.length > 0) {
             state.fornitori = data.fornitori;
+        }
+        if (Array.isArray(data.settori) && data.settori.length > 0) {
+            state.settori = data.settori;
         }
         state.availableYears = data.available_years || [];
         state.catalogSuggestions = data.catalog_suggestions || [];
@@ -1662,12 +1860,14 @@ async function loadAcquistiDatabase() {
             !state.dbFilterMonth &&
             !state.dbFilterDate &&
             !state.dbFilterSupplier &&
+            !state.dbFilterSettore &&
             !state.dbSearchQuery
         ) {
             countEl.textContent = state.acquisti.length;
         }
 
         renderAllFornitoriSelects();
+        renderAllSettoriSelects();
         populateDbYearsDropdown();
         populateCatalogDatalist();
         renderAcquistiSection();
@@ -1706,7 +1906,7 @@ function populateCatalogDatalist() {
 
 function setDbGroupBy(mode) {
     state.dbGroupBy = mode;
-    ["day", "month", "year", "supplier", "product", "none"].forEach((m) => {
+    ["day", "month", "year", "supplier", "settore", "product", "none"].forEach((m) => {
         document.getElementById(`grp-btn-${m}`)?.classList.toggle("active", m === mode);
     });
     renderAcquistiSection();
@@ -1714,6 +1914,7 @@ function setDbGroupBy(mode) {
 
 function onDbFilterChange() {
     state.dbFilterSupplier = document.getElementById("db-filter-supplier").value;
+    state.dbFilterSettore = document.getElementById("db-filter-settore")?.value || "";
     state.dbFilterYear = document.getElementById("db-filter-year").value;
     state.dbFilterMonth = document.getElementById("db-filter-month").value;
     state.dbFilterDate = document.getElementById("db-filter-date").value;
@@ -1731,11 +1932,14 @@ function onDbSearchInput(val) {
 
 function resetDbFilters() {
     state.dbFilterSupplier = "";
+    state.dbFilterSettore = "";
     state.dbFilterYear = "";
     state.dbFilterMonth = "";
     state.dbFilterDate = "";
     state.dbSearchQuery = "";
     document.getElementById("db-filter-supplier").value = "";
+    const settEl = document.getElementById("db-filter-settore");
+    if (settEl) settEl.value = "";
     document.getElementById("db-filter-year").value = "";
     document.getElementById("db-filter-month").value = "";
     document.getElementById("db-filter-date").value = "";
@@ -1807,6 +2011,9 @@ function renderAcquistiSection() {
         } else if (state.dbGroupBy === "supplier") {
             key = String(r.fornitore || "Aldi").toUpperCase();
             title = `🏪 Fornitore: ${r.fornitore || "Aldi"}`;
+        } else if (state.dbGroupBy === "settore") {
+            key = String(r.settore || "Cucina").toUpperCase();
+            title = `🏷️ Settore: ${r.settore || "Cucina"}`;
         } else if (state.dbGroupBy === "product") {
             key = String(r.descrizione_prodotto || "").toUpperCase();
             title = `📦 Prodotto: ${r.descrizione_prodotto}`;
@@ -1849,6 +2056,7 @@ function buildAcquistiTableElement(rows) {
             <tr>
                 <th>Data di Acquisto</th>
                 <th>Fornitore</th>
+                <th>Settore</th>
                 <th>Descrizione del Prodotto</th>
                 <th>Commento</th>
                 <th class="num-col">Prezzo Unitario</th>
@@ -1879,6 +2087,18 @@ function buildAcquistiTableElement(rows) {
                 )
                 .join("") + `<option value="__CUSTOM__">✎ Altro / Modifica...</option>`;
 
+        const currentSett = r.settore || "Cucina";
+        const settOptions = getSettoriNames(currentSett);
+        const settOptionsHtml =
+            settOptions
+                .map(
+                    (sn) =>
+                        `<option value="${escapeHtmlAttr(sn)}" ${
+                            sn.toLowerCase() === currentSett.toLowerCase() ? "selected" : ""
+                        }>${escapeHtml(sn)}</option>`
+                )
+                .join("") + `<option value="__CUSTOM__">✎ Altro / Gestisci...</option>`;
+
         tr.innerHTML = `
             <td>
                 <input
@@ -1891,6 +2111,11 @@ function buildAcquistiTableElement(rows) {
             <td>
                 <select class="db-inline-select select-forn" title="Seleziona o modifica Fornitore (Aldi, Coop, Lidl, Migros...)">
                     ${optionsHtml}
+                </select>
+            </td>
+            <td>
+                <select class="db-inline-select select-settore" title="Seleziona o modifica Settore (Cucina, Bar, Hotel, Cave à vin...)">
+                    ${settOptionsHtml}
                 </select>
             </td>
             <td>
@@ -1938,6 +2163,7 @@ function buildAcquistiTableElement(rows) {
 
         const dateInp = tr.querySelector(".db-inline-date");
         const fornSel = tr.querySelector(".select-forn");
+        const settSel = tr.querySelector(".select-settore");
         const noteInp = tr.querySelector(".input-note");
         const puInp = tr.querySelector(".input-pu");
         const qtyInp = tr.querySelector(".input-qty");
@@ -1960,6 +2186,14 @@ function buildAcquistiTableElement(rows) {
                 }
             } else {
                 await updateAcquistoInline(r.id, { fornitore: fornSel.value });
+            }
+        });
+        settSel.addEventListener("change", async () => {
+            if (settSel.value === "__CUSTOM__") {
+                settSel.value = currentSett;
+                openSettoriModal();
+            } else {
+                await updateAcquistoInline(r.id, { settore: settSel.value });
             }
         });
         puInp.addEventListener("change", () => {
@@ -2033,6 +2267,41 @@ function onAcqFornitoreSelectChange(val) {
     }
 }
 
+function populateAcqModalSettoreSelect(selectedSettore = "Cucina") {
+    const sel = document.getElementById("acq-settore-select");
+    if (!sel) return;
+    sel.innerHTML = "";
+    const cleanTarget = String(selectedSettore || "Cucina").trim() || "Cucina";
+    const names = getSettoriNames(cleanTarget);
+    for (const n of names) {
+        const opt = document.createElement("option");
+        opt.value = n;
+        opt.textContent = n;
+        if (n.toLowerCase() === cleanTarget.toLowerCase()) opt.selected = true;
+        sel.appendChild(opt);
+    }
+    const customOpt = document.createElement("option");
+    customOpt.value = "__CUSTOM__";
+    customOpt.textContent = "＋ Nuovo Settore...";
+    sel.appendChild(customOpt);
+
+    const grp = document.getElementById("acq-custom-settore-group");
+    if (grp) grp.classList.add("hidden");
+    const inp = document.getElementById("acq-settore-custom");
+    if (inp) inp.value = "";
+}
+
+function onAcqSettoreSelectChange(val) {
+    const grp = document.getElementById("acq-custom-settore-group");
+    if (!grp) return;
+    if (val === "__CUSTOM__") {
+        grp.classList.remove("hidden");
+        document.getElementById("acq-settore-custom")?.focus();
+    } else {
+        grp.classList.add("hidden");
+    }
+}
+
 function openAcquistoModal() {
     document.getElementById("modal-acquisto-title").textContent = "➕ Registra Acquisto nel Database";
     document.getElementById("acq-edit-id").value = "";
@@ -2046,6 +2315,7 @@ function openAcquistoModal() {
     document.getElementById("btn-delete-acquisto").classList.add("hidden");
 
     populateAcqModalFornitoreSelect(state.currentList?.fornitore || "Aldi");
+    populateAcqModalSettoreSelect("Cucina");
     openModal("modal-acquisto");
     setTimeout(() => document.getElementById("acq-descrizione").focus(), 60);
 }
@@ -2065,6 +2335,7 @@ function openEditAcquistoModal(id) {
     document.getElementById("btn-delete-acquisto").classList.remove("hidden");
 
     populateAcqModalFornitoreSelect(r.fornitore || "Aldi");
+    populateAcqModalSettoreSelect(r.settore || "Cucina");
     openModal("modal-acquisto");
 }
 
@@ -2077,6 +2348,9 @@ function onAcquistoProductInput(val) {
         }
         if (match.last_fornitore) {
             populateAcqModalFornitoreSelect(match.last_fornitore);
+        }
+        if (match.settore) {
+            populateAcqModalSettoreSelect(match.settore);
         }
         if (match.last_unit_price > 0 && !document.getElementById("acq-prezzo-unitario").value) {
             document.getElementById("acq-prezzo-unitario").value = match.last_unit_price;
@@ -2100,6 +2374,10 @@ async function submitAcquistoModal(e) {
     const fornCustom = document.getElementById("acq-fornitore-custom").value.trim();
     const fornitore = fornSelect === "__CUSTOM__" ? fornCustom || "Aldi" : fornSelect;
 
+    const settSelect = document.getElementById("acq-settore-select")?.value || "Cucina";
+    const settCustom = (document.getElementById("acq-settore-custom")?.value || "").trim();
+    const settore = settSelect === "__CUSTOM__" ? settCustom || "Cucina" : settSelect;
+
     const data_acquisto = document.getElementById("acq-data").value || todayISO();
     const unita = document.getElementById("acq-unita").value.trim() || "Pz";
     const prezzo_unitario = parseFloat(document.getElementById("acq-prezzo-unitario").value || "0") || 0;
@@ -2118,6 +2396,7 @@ async function submitAcquistoModal(e) {
                 body: JSON.stringify({
                     descrizione_prodotto,
                     fornitore,
+                    settore,
                     categoria,
                     unita,
                     prezzo_unitario,
@@ -2133,6 +2412,7 @@ async function submitAcquistoModal(e) {
                 body: JSON.stringify({
                     descrizione_prodotto,
                     fornitore,
+                    settore,
                     categoria,
                     unita,
                     prezzo_unitario,
@@ -2144,6 +2424,7 @@ async function submitAcquistoModal(e) {
             showToast(`Acquisto "${descrizione_prodotto}" (${fornitore}) salvato nel Database!`, "success");
         }
         closeModal("modal-acquisto");
+        await loadSettoriList();
         await loadAcquistiDatabase();
     } catch (err) {
         showToast(err.message);
@@ -2438,6 +2719,7 @@ function downloadPurchasesPdf() {
         mese: state.dbFilterMonth || "",
         giorno: state.dbFilterDate || "",
         fornitore: state.dbFilterSupplier || "",
+        settore: state.dbFilterSettore || "",
         q: state.dbSearchQuery || "",
     });
     const pdfUrl = `/api/acquisti/pdf?${params.toString()}`;
@@ -3249,13 +3531,15 @@ const analyticsState = {
     rawSupplierPrices: [],
     rawCategories: [],
     rawFornitori: [],
+    rawSettori: [],
     source: "combined",
     primaryMetric: "spend", // 'spend' | 'qty' | 'unit_price'
-    distMode: "category", // 'category' | 'supplier'
+    distMode: "category", // 'category' | 'supplier' | 'settore'
     sortBy: "spend_desc",
     searchQuery: "",
     filterCategory: "ALL",
     filterSupplier: "ALL",
+    filterSettore: "ALL",
     filterYear: "ALL",
     filterMonth: "ALL",
     minPrice: "",
@@ -3304,6 +3588,7 @@ async function loadAnalyticsDashboard(forceReload = false) {
         analyticsState.rawSupplierPrices = data.supplier_prices || [];
         analyticsState.rawCategories = data.categories || [];
         analyticsState.rawFornitori = data.fornitori || [];
+        analyticsState.rawSettori = data.settori || state.settori || [];
         analyticsState.loaded = true;
 
         populateAnalyticsFilterDropdowns();
@@ -3354,6 +3639,25 @@ function populateAnalyticsFilterDropdowns() {
         }
     }
 
+    const settSel = document.getElementById("an-filter-settore");
+    if (settSel) {
+        const prev = analyticsState.filterSettore || "ALL";
+        const setts = new Set();
+        (analyticsState.rawSettori || state.settori || []).forEach((s) => setts.add(s.nome));
+        (analyticsState.rawAcquisti || []).forEach((r) => setts.add(r.settore || "Cucina"));
+        (analyticsState.rawListItems || []).forEach((r) => setts.add(r.settore || "Cucina"));
+        (analyticsState.rawCatalog || []).forEach((r) => setts.add(r.settore || "Cucina"));
+
+        settSel.innerHTML = `<option value="ALL">Tutti i settori</option>`;
+        for (const s of Array.from(setts).filter(Boolean)) {
+            const opt = document.createElement("option");
+            opt.value = s;
+            opt.textContent = s;
+            if (s.toLowerCase() === prev.toLowerCase()) opt.selected = true;
+            settSel.appendChild(opt);
+        }
+    }
+
     const yearSel = document.getElementById("an-filter-year");
     if (yearSel) {
         const prev = analyticsState.filterYear || "ALL";
@@ -3390,6 +3694,7 @@ function setAnalyticsDistMode(mode) {
     analyticsState.distMode = mode;
     document.getElementById("an-dist-btn-cat")?.classList.toggle("active", mode === "category");
     document.getElementById("an-dist-btn-sup")?.classList.toggle("active", mode === "supplier");
+    document.getElementById("an-dist-btn-sec")?.classList.toggle("active", mode === "settore");
     renderAnalyticsDashboard();
 }
 
@@ -3416,6 +3721,7 @@ function onAnalyticsControlChange() {
     analyticsState.sortBy = document.getElementById("an-sort-select")?.value || "spend_desc";
     analyticsState.filterCategory = document.getElementById("an-filter-category")?.value || "ALL";
     analyticsState.filterSupplier = document.getElementById("an-filter-supplier")?.value || "ALL";
+    analyticsState.filterSettore = document.getElementById("an-filter-settore")?.value || "ALL";
     analyticsState.filterYear = document.getElementById("an-filter-year")?.value || "ALL";
     analyticsState.filterMonth = document.getElementById("an-filter-month")?.value || "ALL";
     analyticsState.minPrice = document.getElementById("an-filter-min-price")?.value || "";
@@ -3428,6 +3734,7 @@ function resetAnalyticsFilters() {
     analyticsState.searchQuery = "";
     analyticsState.filterCategory = "ALL";
     analyticsState.filterSupplier = "ALL";
+    analyticsState.filterSettore = "ALL";
     analyticsState.filterYear = "ALL";
     analyticsState.filterMonth = "ALL";
     analyticsState.minPrice = "";
@@ -3442,6 +3749,7 @@ function resetAnalyticsFilters() {
     setVal("an-search-input", "");
     setVal("an-filter-category", "ALL");
     setVal("an-filter-supplier", "ALL");
+    setVal("an-filter-settore", "ALL");
     setVal("an-filter-year", "ALL");
     setVal("an-filter-month", "ALL");
     setVal("an-filter-min-price", "");
@@ -3500,6 +3808,7 @@ function buildAnalyticsDataset() {
             const catItem = catalogMap.get(name.toLowerCase());
             const category = String(r.categoria || catItem?.category || "ALIMENTARI").toUpperCase();
             const supplier = String(r.fornitore || catItem?.last_fornitore || "Aldi").trim();
+            const settore = String(r.settore || catItem?.settore || "Cucina").trim();
             const unit = String(r.unita || catItem?.default_unit || "Pz").trim();
             const qty = Number(r.quantita) > 0 ? Number(r.quantita) : 1;
             const unitPrice = Number(r.prezzo_unitario) > 0 ? Number(r.prezzo_unitario) : Number(catItem?.last_unit_price || 0);
@@ -3509,6 +3818,7 @@ function buildAnalyticsDataset() {
                 name,
                 category,
                 supplier,
+                settore,
                 unit,
                 qty,
                 unitPrice,
@@ -3536,6 +3846,7 @@ function buildAnalyticsDataset() {
             const catItem = catalogMap.get(name.toLowerCase());
             const category = String(li.category || catItem?.category || "ALIMENTARI").toUpperCase();
             const supplier = String(li.fornitore || catItem?.last_fornitore || "Aldi").trim();
+            const settore = String(li.settore || catItem?.settore || "Cucina").trim();
             const unit = String(li.unit || catItem?.default_unit || "Pz").trim();
             const qty = parseAnalyticsQty(li.quantity, true);
             const unitPrice = Number(li.unit_price) > 0 ? Number(li.unit_price) : Number(catItem?.last_unit_price || 0);
@@ -3546,6 +3857,7 @@ function buildAnalyticsDataset() {
                 name,
                 category,
                 supplier,
+                settore,
                 unit,
                 qty,
                 unitPrice,
@@ -3564,6 +3876,7 @@ function buildAnalyticsDataset() {
                 name,
                 category: String(c.category || "ALIMENTARI").toUpperCase(),
                 supplier: String(c.last_fornitore || "Aldi").trim(),
+                settore: String(c.settore || "Cucina").trim(),
                 unit: String(c.default_unit || "Pz").trim(),
                 qty: 1,
                 unitPrice,
@@ -3573,23 +3886,26 @@ function buildAnalyticsDataset() {
         }
     }
 
-    // Applica i filtri a livello di record (Categoria, Fornitore, Anno, Mese, Ricerca)
+    // Applica i filtri a livello di record (Categoria, Fornitore, Settore, Anno, Mese, Ricerca)
     const q = (analyticsState.searchQuery || "").toLowerCase();
     const fCat = analyticsState.filterCategory || "ALL";
     const fSup = analyticsState.filterSupplier || "ALL";
+    const fSett = analyticsState.filterSettore || "ALL";
     const fYear = analyticsState.filterYear || "ALL";
     const fMonth = analyticsState.filterMonth || "ALL";
 
     const filteredRecords = records.filter((rec) => {
         if (fCat !== "ALL" && rec.category.toUpperCase() !== fCat.toUpperCase()) return false;
         if (fSup !== "ALL" && rec.supplier.toLowerCase() !== fSup.toLowerCase()) return false;
+        if (fSett !== "ALL" && String(rec.settore || "Cucina").toLowerCase() !== fSett.toLowerCase()) return false;
         if (fYear !== "ALL" && String(rec.date).slice(0, 4) !== fYear) return false;
         if (fMonth !== "ALL" && String(rec.date).slice(5, 7) !== fMonth) return false;
         if (
             q &&
             !rec.name.toLowerCase().includes(q) &&
             !rec.category.toLowerCase().includes(q) &&
-            !rec.supplier.toLowerCase().includes(q)
+            !rec.supplier.toLowerCase().includes(q) &&
+            !String(rec.settore || "").toLowerCase().includes(q)
         ) {
             return false;
         }
@@ -3605,6 +3921,7 @@ function buildAnalyticsDataset() {
             productMap.set(key, {
                 name: rec.name,
                 category: rec.category,
+                settore: rec.settore || catItem?.settore || "Cucina",
                 unit: rec.unit || catItem?.default_unit || "Pz",
                 totalQty: 0,
                 totalSpend: 0,
@@ -3844,7 +4161,12 @@ function renderAnalyticsDistributionChart(filteredRecords) {
     const totals = new Map();
 
     for (const r of filteredRecords) {
-        const key = mode === "supplier" ? r.supplier || "Aldi" : r.category || "ALTRO";
+        const key =
+            mode === "supplier"
+                ? r.supplier || "Aldi"
+                : mode === "settore"
+                ? r.settore || "Cucina"
+                : r.category || "ALTRO";
         const val = metric === "qty" ? r.qty : r.spend;
         totals.set(key, (totals.get(key) || 0) + val);
     }
@@ -3893,12 +4215,16 @@ function renderAnalyticsDistributionChart(filteredRecords) {
             const isActive =
                 (mode === "category" && analyticsState.filterCategory === label) ||
                 (mode === "supplier" &&
-                    analyticsState.filterSupplier.toLowerCase() === label.toLowerCase());
+                    analyticsState.filterSupplier.toLowerCase() === label.toLowerCase()) ||
+                (mode === "settore" &&
+                    analyticsState.filterSettore.toLowerCase() === label.toLowerCase());
 
             const clickHandler =
                 mode === "category"
                     ? `toggleAnalyticsQuickFilter('category', '${escapeHtmlAttr(label)}')`
-                    : `toggleAnalyticsQuickFilter('supplier', '${escapeHtmlAttr(label)}')`;
+                    : mode === "supplier"
+                    ? `toggleAnalyticsQuickFilter('supplier', '${escapeHtmlAttr(label)}')`
+                    : `toggleAnalyticsQuickFilter('settore', '${escapeHtmlAttr(label)}')`;
 
             return `
                 <div class="an-legend-item ${isActive ? "is-active-filter" : ""}" onclick="${clickHandler}" title="Clicca per filtrare per ${escapeHtmlAttr(label)}">
@@ -3942,6 +4268,11 @@ function toggleAnalyticsQuickFilter(kind, value) {
             analyticsState.filterSupplier.toLowerCase() === value.toLowerCase() ? "ALL" : value;
         const sel = document.getElementById("an-filter-supplier");
         if (sel) sel.value = analyticsState.filterSupplier;
+    } else if (kind === "settore") {
+        analyticsState.filterSettore =
+            analyticsState.filterSettore.toLowerCase() === value.toLowerCase() ? "ALL" : value;
+        const sel = document.getElementById("an-filter-settore");
+        if (sel) sel.value = analyticsState.filterSettore;
     }
     renderAnalyticsDashboard();
 }
@@ -4268,6 +4599,7 @@ function renderAnalyticsProductsTable(products, totalSpend, totalQty) {
                     <td>
                         <div style="font-weight:800; color:#0f172a; font-size:0.92rem;">${escapeHtml(p.name)}</div>
                         <span class="an-cat-badge" style="background:${catColor};">${escapeHtml(p.category)}</span>
+                        <span class="cat-mini-badge" style="margin-left:5px;">🏷️ ${escapeHtml(p.settore || "Cucina")}</span>
                     </td>
                     <td>
                         <div class="an-sup-chips">${supChipsHtml || "—"}</div>

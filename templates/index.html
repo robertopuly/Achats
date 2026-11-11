@@ -164,7 +164,7 @@
             <!-- BARRA GESTIONE DATABASE ACQUISTI (Visibile nella sezione Database Acquisti) -->
             <div id="db-header-toolbar" class="list-toolbar hidden">
                 <div class="db-toolbar-title">
-                    <span>📊 <strong>Tabella Principale Acquisti</strong> — Descrizione, Fornitore, Prezzo Unitario, Quantità, Prezzo Totale e Data</span>
+                    <span>📊 <strong>Tabella Principale Acquisti</strong> — Descrizione, Fornitore, Settore, Prezzo Unitario, Quantità, Prezzo Totale e Data</span>
                 </div>
                 <div class="list-buttons-group">
                     <button type="button" class="btn btn-show-db" onclick="switchMainSection('list')" title="Torna alla Lista della Spesa">
@@ -175,6 +175,9 @@
                     </button>
                     <button type="button" class="btn btn-secondary" onclick="openFornitoriModal()" title="Modifica elenco Fornitori (Aldi, Coop, Lidl, Migros)">
                         🏪 Fornitori
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="openSettoriModal()" title="Modifica elenco Settori (Cucina, Bar, Hotel, Cave à vin)">
+                        🏷️ Settori
                     </button>
                     <button type="button" class="btn btn-pdf" onclick="downloadPurchasesPdf()" title="Salva PDF della Tabella Acquisti">
                         📄 Salva PDF Acquisti
@@ -311,6 +314,9 @@
                         <button type="button" id="grp-btn-supplier" class="seg-btn" onclick="setDbGroupBy('supplier')">
                             🏪 Fornitore
                         </button>
+                        <button type="button" id="grp-btn-settore" class="seg-btn" onclick="setDbGroupBy('settore')">
+                            🏷️ Settore
+                        </button>
                         <button type="button" id="grp-btn-product" class="seg-btn" onclick="setDbGroupBy('product')">
                             📦 Prodotto
                         </button>
@@ -325,6 +331,13 @@
                         <label for="db-filter-supplier">🏪 Fornitore:</label>
                         <select id="db-filter-supplier" onchange="onDbFilterChange()">
                             <option value="">Tutti i fornitori</option>
+                        </select>
+                    </div>
+
+                    <div class="db-filter-item">
+                        <label for="db-filter-settore">🏷️ Settore:</label>
+                        <select id="db-filter-settore" onchange="onDbFilterChange()">
+                            <option value="">Tutti i settori</option>
                         </select>
                     </div>
 
@@ -512,6 +525,13 @@
                     </div>
 
                     <div class="an-filter-box">
+                        <label for="an-filter-settore">🏷️ Settore</label>
+                        <select id="an-filter-settore" onchange="onAnalyticsControlChange()">
+                            <option value="ALL">Tutti i settori</option>
+                        </select>
+                    </div>
+
+                    <div class="an-filter-box">
                         <label for="an-filter-year">📆 Anno</label>
                         <select id="an-filter-year" onchange="onAnalyticsControlChange()">
                             <option value="ALL">Tutti gli anni</option>
@@ -595,6 +615,9 @@
                             </button>
                             <button type="button" id="an-dist-btn-sup" class="an-pill-btn" onclick="setAnalyticsDistMode('supplier')">
                                 Fornitori
+                            </button>
+                            <button type="button" id="an-dist-btn-sec" class="an-pill-btn" onclick="setAnalyticsDistMode('settore')">
+                                Settori
                             </button>
                         </div>
                     </div>
@@ -748,6 +771,21 @@
                     <input type="text" id="prod-new-fornitore" placeholder="Es. Manor, Denner..." />
                 </div>
 
+                <div class="form-group">
+                    <label for="prod-settore">🏷️ Settore (Cucina, Bar, Hotel, Cave à vin):</label>
+                    <div class="inline-input-btn">
+                        <select id="prod-settore" onchange="onProdSettoreSelectChange(this.value)" style="flex:1;"></select>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="openSettoriModal()" title="Aggiungi, modifica o elimina Settori">
+                            ✎ Gestisci
+                        </button>
+                    </div>
+                </div>
+
+                <div class="form-group hidden" id="prod-new-settore-group">
+                    <label for="prod-new-settore">Nuovo Settore:</label>
+                    <input type="text" id="prod-new-settore" placeholder="Es. Pasticceria, Spa, Eventi..." />
+                </div>
+
                 <div class="form-row-3">
                     <div class="form-group">
                         <label for="prod-quantity">Quantità:</label>
@@ -839,6 +877,21 @@
                     <input type="text" id="acq-fornitore-custom" placeholder="Es. Denner, Manor, Aligro..." />
                 </div>
 
+                <!-- CASELLA SETTORE PRECOMPILATA (Cucina, Bar, Hotel, Cave à vin) E MODIFICABILE -->
+                <div class="form-group">
+                    <label for="acq-settore-select">🏷️ Settore (seleziona o modifica):</label>
+                    <div class="inline-input-btn">
+                        <select id="acq-settore-select" onchange="onAcqSettoreSelectChange(this.value)" style="flex:1;"></select>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="openSettoriModal()" title="Modifica elenco Settori">
+                            ✎ Gestisci
+                        </button>
+                    </div>
+                </div>
+                <div class="form-group hidden" id="acq-custom-settore-group">
+                    <label for="acq-settore-custom">Scrivi nome Settore personalizzato:</label>
+                    <input type="text" id="acq-settore-custom" placeholder="Es. Pasticceria, Spa..." />
+                </div>
+
                 <div class="form-row-2">
                     <div class="form-group">
                         <label for="acq-data">Data di acquisto:</label>
@@ -916,6 +969,29 @@
 
                 <form onsubmit="addNewFornitoreFromModal(event)" class="inline-input-btn" style="margin-top:8px;">
                     <input type="text" id="new-fornitore-input" placeholder="Aggiungi nuovo fornitore..." required />
+                    <button type="submit" class="btn btn-primary">＋ Aggiungi</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- MODALE: GESTIONE ELENCO SETTORI (Cucina, Bar, Hotel, Cave à vin...) -->
+    <!-- =================================================================== -->
+    <div id="modal-settori" class="modal-backdrop hidden" onclick="closeModalOnBackdrop(event, 'modal-settori')">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2>🏷️ Gestisci Settori</h2>
+                <button type="button" class="modal-close" onclick="closeModal('modal-settori')">✕</button>
+            </div>
+            <div class="modal-body">
+                <p style="font-size:0.86rem; color:#475569;">
+                    Elenco settori disponibili quando modifichi un prodotto o nel Database su PC (precompilato con <strong>Cucina, Bar, Hotel, Cave à vin</strong> e liberamente modificabile):
+                </p>
+                <div id="settori-manage-list" class="fornitori-manage-list"></div>
+
+                <form onsubmit="addNewSettoreFromModal(event)" class="inline-input-btn" style="margin-top:8px;">
+                    <input type="text" id="new-settore-input" placeholder="Aggiungi nuovo settore..." required />
                     <button type="submit" class="btn btn-primary">＋ Aggiungi</button>
                 </form>
             </div>

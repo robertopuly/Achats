@@ -573,6 +573,7 @@ function generatePurchasesPdf({
             month: "Raggruppato per Mese",
             year: "Raggruppato per Anno",
             supplier: "Raggruppato per Fornitore",
+            settore: "Raggruppato per Settore",
             product: "Raggruppato per Prodotto",
             none: "Elenco Completo",
         };
@@ -691,6 +692,9 @@ function generatePurchasesPdf({
             } else if (groupBy === "supplier") {
                 key = String(r.fornitore || "Non specificato").toUpperCase();
                 label = `Fornitore: ${r.fornitore || "Non specificato"}`;
+            } else if (groupBy === "settore") {
+                key = String(r.settore || "Cucina").toUpperCase();
+                label = `Settore: ${r.settore || "Cucina"}`;
             } else if (groupBy === "product") {
                 key = String(r.descrizione_prodotto || "").toUpperCase();
                 label = `Prodotto: ${r.descrizione_prodotto}`;
